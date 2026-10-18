@@ -121,16 +121,12 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 4. Scan council barcodes as items come in. Make troop barcodes and print labels for anything without one.
 5. Use **More → Share the app** for a QR code leaders can scan, then have them add it to their home screen.
 
-## Court of honor import (admins)
+## Check back in & still owed
 
-Give out → "Import earned badges from Scoutbook". Upload the Troop Recognition Report (CSV). Returns and still-owed live under Reports → Envelopes & still owed, and on each scout's page.
-
-- Every badge, rank and award a scout has earned is logged as **handed out**: it leaves stock and goes in the scout's envelope. Whether Scoutbook says Awarded doesn't matter.
-- The first import asks for a start date. Badges earned before it are ignored. The date is saved as "Awards counted from" on the Settings tab.
-- Upload the report again any time. A badge (scout + report name + earned date) is only logged once. Untick one in the preview to skip it for good.
-- Report names that don't match an item get matched once (saved in the Items tab's "Report names" column) or marked "not a closet item".
-- **Envelopes** lists recent imports, with a printable envelope list. When you clean out envelopes nobody picked up, tick them and **Check back in** (back to stock, pending charge waived) or **Check in, still owed** (back to stock, and the scout goes on the Still owed list).
-- **Still owed** also shows on the scout's page, with a Hand out button. Any leader can check an item back in from a scout's page.
+- Every give-out on a scout's page has a **Check back in** button. It puts the item back in stock and waives any pending charge.
+- **Reports → Check back in & still owed** lists everything given out in the last 120 days, grouped by day, patrol and scout, with a printable envelope list. Tick the items nobody picked up and choose **Check back in** or **Check in, still owed**.
+- **Still owed** goes on the "Still owed" tab and shows on the scout's page with a **Hand out** button. Leaders and admins can use all of this; treasurers can view it.
+- Court of honor give-outs are entered in bulk straight into the Log (and Charges for items that cost money), outside the app.
 
 ## Editing the sheet by hand
 
