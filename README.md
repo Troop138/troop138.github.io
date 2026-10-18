@@ -103,6 +103,8 @@ Setup creates the tabs, adds the troop account as the first Admin, loads a start
 
 When you change `Code.js` later, run `clasp push`, then in the editor go to **Deploy → Manage deployments → (pencil) → Version: New version → Deploy**. That keeps the same URL, so the page doesn't need to change.
 
+From the command line instead: `clasp push`, then `clasp redeploy <deploymentId> --description "what changed"`. The deployment ID is the long part of the Web app URL between `/s/` and `/exec`, and `clasp deployments` lists it. Don't use `clasp deploy` for updates: that makes a new deployment with a new URL.
+
 ### 6. Publish the site
 
 1. In this repo on GitHub, go to **Settings → Pages** and set **Source** to **GitHub Actions**.
