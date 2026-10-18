@@ -18,9 +18,10 @@
 const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
-  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Barcodes', 'Active'] },
+  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Barcodes', 'Active', 'Report names'] },
   scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active', 'First name', 'Last name', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost'] },
+  awards:   { name: 'Awards',   headers: ['ID', 'Key', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Recognition', 'Earned', 'Status', 'Source', 'Added', 'Log ID', 'Status changed', 'Status changed by', 'Note'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
 
@@ -29,6 +30,9 @@ const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 const CHARGE_STATUSES = ['Pending', 'Posted', 'Waived'];
 const LOG_TYPES = ['out', 'in', 'count'];
+// Pending: earned, not yet handed out. Handed out: logged from the closet.
+// Owed: marked Awarded in Scoutbook but the scout never picked it up. Removed: ignore.
+const AWARD_STATUSES = ['Pending', 'Handed out', 'Owed', 'Removed'];
 
 const SETTINGS_DEFAULTS = [
   ['App title', 'Troop Closet', 'Shown at the top of the app after sign-in'],
@@ -39,6 +43,7 @@ const SETTINGS_DEFAULTS = [
   ['Session days', 30, 'How long a phone stays signed in'],
   ['Backups to keep', 12, 'Weekly copies kept in the backup folder'],
   ['Backup folder ID', '', 'Filled in by setup'],
+  ['Ignored report items', '', 'Report entries that are not closet items, separated by |. Managed from the Court of Honor screen'],
 ];
 
 const STARTER_ITEMS = [
@@ -142,6 +147,13 @@ function applyFormatting_(ss) {
   col_(ch, chh, 'When').setNumberFormat('m/d/yyyy h:mm am/pm');
   col_(ch, chh, 'Status changed').setNumberFormat('m/d/yyyy h:mm am/pm');
 
+  const aw = sheet_('awards'), awh = headerMap_(aw);
+  col_(aw, awh, 'Status').setDataValidation(listRule(AWARD_STATUSES));
+  col_(aw, awh, 'Added').setNumberFormat('m/d/yyyy');
+  col_(aw, awh, 'Status changed').setNumberFormat('m/d/yyyy h:mm am/pm');
+  col_(aw, awh, 'Earned').setNumberFormat('@');
+  protect_(col_(aw, awh, 'Key'), 'Keys stop the same award being imported twice.');
+
   const lg = sheet_('log'), lgh = headerMap_(lg);
   col_(lg, lgh, 'When').setNumberFormat('ddd m/d/yyyy h:mm am/pm');
   col_(lg, lgh, 'Unit cost').setNumberFormat('$#,##0.00');
@@ -182,21 +194,26 @@ function buildReportTabs_(ss) {
   // Stock: on hand is always the sum of the Log, never typed in.
   let s = ss.getSheetByName('Stock') || ss.insertSheet('Stock', 0);
   s.clear(); s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
-  s.getRange('A1:G1').setValues([['Item', 'Category', 'On hand', 'Cost', 'Reorder at', 'Value', 'Status']]).setFontWeight('bold').setBackground('#e3e6da');
+  s.getRange('A1:I1').setValues([['Item', 'Category', 'On hand', 'Reserved', 'Available', 'Cost', 'Reorder at', 'Value', 'Status']]).setFontWeight('bold').setBackground('#e3e6da');
   s.setFrozenRows(1);
   const iId = `${items}!${L(ih, 'ID')}2:${L(ih, 'ID')}`;
+  const aw = TABS.awards.name, awh = headerMap_(sheet_('awards'));
   s.getRange('A2').setFormula(
     `=ARRAYFORMULA(IFERROR(SORT(FILTER({${items}!${L(ih, 'Name')}2:${L(ih, 'Name')}, ${items}!${L(ih, 'Category')}2:${L(ih, 'Category')}, ` +
     `SUMIF(${log}!${L(lh, 'Item ID')}2:${L(lh, 'Item ID')}, ${iId}, ${log}!${L(lh, 'Change')}2:${L(lh, 'Change')}), ` +
+    `COUNTIFS(${aw}!${L(awh, 'Item ID')}2:${L(awh, 'Item ID')}, ${iId}, ${aw}!${L(awh, 'Status')}2:${L(awh, 'Status')}, "Pending"), ` +
+    `SUMIF(${log}!${L(lh, 'Item ID')}2:${L(lh, 'Item ID')}, ${iId}, ${log}!${L(lh, 'Change')}2:${L(lh, 'Change')}) - ` +
+    `COUNTIFS(${aw}!${L(awh, 'Item ID')}2:${L(awh, 'Item ID')}, ${iId}, ${aw}!${L(awh, 'Status')}2:${L(awh, 'Status')}, "Pending"), ` +
     `${items}!${L(ih, 'Cost')}2:${L(ih, 'Cost')}, ${items}!${L(ih, 'Reorder at')}2:${L(ih, 'Reorder at')}}, ` +
     `${iId}<>"", ${items}!${L(ih, 'Active')}2:${L(ih, 'Active')}<>FALSE), 2, TRUE, 1, TRUE), ""))`);
-  s.getRange('F2').setFormula('=ARRAYFORMULA(IF(A2:A="",,C2:C*D2:D))');
-  s.getRange('G2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(C2:C<=0,"Out",IF(C2:C<=E2:E,"Low","OK"))))');
-  s.getRange('D:D').setNumberFormat('$#,##0.00'); s.getRange('F:F').setNumberFormat('$#,##0.00');
+  // The array fills A:G: Item, Category, On hand, Reserved (pending awards), Available, Cost, Reorder at.
+  s.getRange('H2').setFormula('=ARRAYFORMULA(IF(A2:A="",,C2:C*F2:F))');
+  s.getRange('I2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(E2:E<=0,"Out",IF(E2:E<=G2:G,"Low","OK"))))');
+  s.getRange('F:F').setNumberFormat('$#,##0.00'); s.getRange('H:H').setNumberFormat('$#,##0.00');
   s.setColumnWidth(1, 240); s.setColumnWidth(2, 200);
   s.setConditionalFormatRules([
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Out').setBackground('#f6d6cf').setFontColor('#8e2a18').setRanges([s.getRange('G2:G')]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Low').setBackground('#f6e7c4').setFontColor('#7a5410').setRanges([s.getRange('G2:G')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Out').setBackground('#f6d6cf').setFontColor('#8e2a18').setRanges([s.getRange('I2:I')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Low').setBackground('#f6e7c4').setFontColor('#7a5410').setRanges([s.getRange('I2:I')]).build(),
   ]);
   s.protect().setDescription('Stock is calculated from Items and Log. Edit those instead.').setWarningOnly(true);
 
@@ -300,6 +317,11 @@ const ACTIONS = {
   updateItem: (me, a) => withLock_(() => updateItem_(me, a)),
   linkBarcode: (me, a) => withLock_(() => linkBarcode_(me, a)),
   makeTroopBarcode: (me, a) => withLock_(() => makeTroopBarcode_(me, a)),
+  importAwards: (me, a) => { need_(me, ['Admin']); return withLock_(() => importAwards_(me, a)); },
+  addAward: (me, a) => { need_(me, ['Admin']); return withLock_(() => addAward_(me, a)); },
+  setAwards: (me, a) => { need_(me, ['Admin']); return withLock_(() => setAwards_(me, a)); },
+  matchReportName: (me, a) => { need_(me, ['Admin']); return withLock_(() => matchReportName_(me, a)); },
+  ignoreReportName: (me, a) => { need_(me, ['Admin']); return withLock_(() => ignoreReportName_(me, a)); },
   setChargeStatus: (me, a) => { need_(me, ['Admin', 'Treasurer']); return withLock_(() => setChargeStatus_(me, a)); },
   saveLeader: (me, a) => { need_(me, ['Admin']); return withLock_(() => saveLeader_(me, a)); },
   signOutEverywhere: (me, a) => { need_(me, ['Admin']); revokeSessions_(String(a.email || '').toLowerCase()); return true; },
@@ -374,7 +396,9 @@ function need_(me, roles) {
 /* ---------- reads ---------- */
 
 function getData_(me) {
-  const items = readTable_('items').filter(r => r['ID']).map(itemOut_);
+  const awardRows = readTable_('awards');
+  const reserved = {}; awardRows.forEach(r => { if (r['Status'] === 'Pending') reserved[String(r['Item ID'])] = (reserved[String(r['Item ID'])] || 0) + 1; });
+  const items = readTable_('items').filter(r => r['ID']).map(r => Object.assign(itemOut_(r), { reserved: reserved[String(r['ID'])] || 0 }));
   const scouts = readTable_('scouts').filter(r => r['ID']).map(r => ({
     id: String(r['ID']), name: String(r['Name']), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
     needsUpdate: r['Needs roster update'] === true || String(r['Needs roster update']).toUpperCase() === 'TRUE',
@@ -397,6 +421,13 @@ function getData_(me) {
     sheetUrl: me.role === 'Admin' ? SpreadsheetApp.getActive().getUrl() : '',
   };
   if (me.role === 'Admin') {
+    out.awards = awardRows.filter(r => r['ID'] && (r['Status'] === 'Pending' || r['Status'] === 'Owed')).map(r => ({
+      id: String(r['ID']), key: String(r['Key']), scoutId: String(r['Scout ID']), scoutName: String(r['Scout']), itemId: String(r['Item ID']),
+      itemName: String(r['Item']), label: String(r['Recognition']), earned: String(r['Earned'] || ''), status: String(r['Status']),
+      source: String(r['Source'] || ''), note: String(r['Note'] || ''), addedAt: time_(r['Added']),
+    }));
+    out.awardKeys = awardRows.filter(r => r['Key']).map(r => String(r['Key']));
+    out.ignoredReportNames = splitNames_(getSetting_('Ignored report items'));
     out.leaders = readTable_('leaders').filter(r => r['Email']).map(r => ({
       email: String(r['Email']).toLowerCase(), name: String(r['Name'] || ''), role: String(r['Role'] || 'Leader'), active: r['Active'] !== false,
     }));
@@ -411,6 +442,7 @@ function itemOut_(r) {
     reorder: Number(r['Reorder at']) || 0, stockTo: Number(r['Stock to']) || 0,
     barcodes: String(r['Barcodes'] || '').split(/[,\s]+/).filter(Boolean),
     active: r['Active'] !== false,
+    reportNames: splitNames_(r['Report names']),
   };
 }
 
@@ -435,35 +467,161 @@ function give_(me, a) {
   const scout = scoutById_(a.scoutId);
   if (!scout || scout['Active'] === false) throw apiError_('bad_request', 'That scout is not on the active list.');
   const lines = cleanLines_(a.lines);
-  const items = itemsById_();
-  const log = readTable_('log');
-  const now = new Date();
-  const logRows = [], chargeRows = [];
-  lines.forEach(l => {
-    const it = items[l.itemId];
-    if (!it) throw apiError_('bad_request', 'One of those items was removed. Refresh and try again.');
-    const cost = Number(it['Cost']) || 0, rule = it['Charge rule'];
-    const logId = id_();
-    logRows.push({ 'ID': logId, 'When': now, 'Item ID': l.itemId, 'Item': it['Name'], 'Change': -l.qty, 'Type': 'out',
-      'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Note': '', 'Logged by': me.email, 'Unit cost': cost });
-    let charged = 0;
-    if (rule === 'Always charge') charged = l.qty;
-    else if (rule === 'First one free') {
-      const prior = log.filter(r => String(r['Scout ID']) === String(scout['ID']) && String(r['Item ID']) === l.itemId && r['Type'] === 'out')
-        .reduce((s, r) => s - (Number(r['Change']) || 0), 0);
-      charged = prior > 0 ? l.qty : l.qty - 1;
-    }
-    if (charged > 0 && cost > 0) {
-      const waived = String(l.waiveReason || '').trim();
-      chargeRows.push({ 'ID': id_(), 'When': now, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': l.itemId, 'Item': it['Name'],
-        'Qty': charged, 'Amount': round2_(charged * cost), 'Status': waived ? 'Waived' : 'Pending', 'Reason': waived.slice(0, 200),
-        'Log ID': logId, 'Created by': me.email, 'Status changed': waived ? now : '', 'Status changed by': waived ? me.email : '' });
-    }
-  });
+  const ctx = giveContext_();
+  lines.forEach(l => giveOne_(me, ctx, scout, l.itemId, l.qty, '', l.waiveReason));
+  const logRows = ctx.logRows, chargeRows = ctx.chargeRows;
   appendRows_('log', logRows);
   if (chargeRows.length) appendRows_('charges', chargeRows);
   return { logIds: logRows.map(r => r['ID']), chargeIds: chargeRows.map(r => r['ID']), charged: round2_(chargeRows.filter(r => r['Status'] === 'Pending').reduce((s, r) => s + r['Amount'], 0)) };
 }
+
+/** Shared state for one batch of give-outs, so "first one free" sees earlier lines in the same batch. */
+function giveContext_() {
+  return { items: itemsById_(), log: readTable_('log'), now: new Date(), logRows: [], chargeRows: [] };
+}
+
+/** Queue one give-out (and its charge, if any) in ctx. Caller appends ctx.logRows / ctx.chargeRows. */
+function giveOne_(me, ctx, scout, itemId, qty, note, waiveReason) {
+  const it = ctx.items[itemId];
+  if (!it) throw apiError_('bad_request', 'One of those items was removed. Refresh and try again.');
+  const cost = Number(it['Cost']) || 0, rule = it['Charge rule'], now = ctx.now;
+  const logId = id_();
+  const row = { 'ID': logId, 'When': now, 'Item ID': itemId, 'Item': it['Name'], 'Change': -qty, 'Type': 'out',
+    'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Note': String(note || '').slice(0, 200), 'Logged by': me.email, 'Unit cost': cost };
+  let charged = 0;
+  if (rule === 'Always charge') charged = qty;
+  else if (rule === 'First one free') {
+    const prior = ctx.log.filter(r => String(r['Scout ID']) === String(scout['ID']) && String(r['Item ID']) === itemId && r['Type'] === 'out')
+      .reduce((s, r) => s - (Number(r['Change']) || 0), 0);
+    charged = prior > 0 ? qty : qty - 1;
+  }
+  ctx.log.push(row); ctx.logRows.push(row);
+  if (charged > 0 && cost > 0) {
+    const waived = String(waiveReason || '').trim();
+    ctx.chargeRows.push({ 'ID': id_(), 'When': now, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': itemId, 'Item': it['Name'],
+      'Qty': charged, 'Amount': round2_(charged * cost), 'Status': waived ? 'Waived' : 'Pending', 'Reason': waived.slice(0, 200),
+      'Log ID': logId, 'Created by': me.email, 'Status changed': waived ? now : '', 'Status changed by': waived ? me.email : '' });
+  }
+  return logId;
+}
+
+/* ---------- court of honor: awards from the Scoutbook recognition report ---------- */
+
+function awardKey_(scoutId, label, earned) {
+  return [String(scoutId), String(label).trim().toLowerCase().replace(/\s+/g, ' '), String(earned || '').trim()].join('|');
+}
+
+/**
+ * Import parsed rows from the Troop Recognition Report. The page matches report names to scouts and
+ * report labels to items, and sends:
+ *   rows: [{ scoutId, itemId, label, earned, awarded, handedOut }]
+ *     awarded:   true when the report marks it awarded (%)
+ *     handedOut: for awarded rows, false = never picked up (goes to Owed instead of the Log)
+ *   since: optional time (ms). Awarded rows with no pending record are only logged if earned on/after it.
+ * Not-yet-awarded rows become Pending. Awarded rows that were Pending are logged as given out.
+ */
+function importAwards_(me, a) {
+  const rows = Array.isArray(a.rows) ? a.rows.slice(0, 5000) : [];
+  const since = Number(a.since) || 0;
+  const scouts = {}; readTable_('scouts').forEach(r => { if (r['ID']) scouts[String(r['ID'])] = r; });
+  const existing = {}; readTable_('awards').forEach(r => { if (r['Key']) existing[String(r['Key'])] = r; });
+  const ctx = giveContext_();
+  const add = [], updates = [];
+  const out = { pending: 0, handedOut: 0, owed: 0, skipped: 0 };
+  rows.forEach(r => {
+    const scout = scouts[String(r.scoutId)], item = ctx.items[String(r.itemId)];
+    if (!scout || !item) { out.skipped++; return; }
+    const label = String(r.label || '').trim().slice(0, 120), earned = String(r.earned || '').trim().slice(0, 20);
+    const key = awardKey_(scout['ID'], label, earned), ex = existing[key];
+    const base = { 'Key': key, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': item['ID'], 'Item': item['Name'], 'Recognition': label, 'Earned': earned, 'Source': 'Report' };
+    if (!r.awarded) {
+      if (!ex) { add.push(Object.assign({ 'ID': id_(), 'Status': 'Pending', 'Added': ctx.now }, base)); existing[key] = { 'Status': 'Pending' }; out.pending++; }
+      return;
+    }
+    const wasPending = ex && ex['Status'] === 'Pending';
+    const catchUp = !ex && since && earnedTime_(earned) >= since;
+    if (!wasPending && !catchUp) { out.skipped++; return; }
+    let patch;
+    if (r.handedOut === false) { patch = { 'Status': 'Owed', 'Status changed': ctx.now, 'Status changed by': me.email }; out.owed++; }
+    else {
+      const logId = giveOne_(me, ctx, scout, String(item['ID']), 1, `Court of honor: ${label}`, '');
+      patch = { 'Status': 'Handed out', 'Log ID': logId, 'Status changed': ctx.now, 'Status changed by': me.email }; out.handedOut++;
+    }
+    if (wasPending && ex._row) updates.push([ex._row, patch]);
+    else add.push(Object.assign({ 'ID': id_(), 'Added': ctx.now }, base, patch));
+    existing[key] = { 'Status': patch['Status'] };
+  });
+  appendRows_('log', ctx.logRows);
+  if (ctx.chargeRows.length) appendRows_('charges', ctx.chargeRows);
+  updates.forEach(([row, patch]) => updateRow_('awards', row, patch));
+  appendRows_('awards', add);
+  return out;
+}
+
+/** Add an item a scout should get that isn't in the report (manual pending, or owed). */
+function addAward_(me, a) {
+  const scout = scoutById_(a.scoutId), item = itemsById_()[String(a.itemId)];
+  if (!scout) throw apiError_('bad_request', 'That scout no longer exists.');
+  if (!item) throw apiError_('bad_request', 'That item no longer exists.');
+  const status = a.status === 'Owed' ? 'Owed' : 'Pending', now = new Date();
+  const qty = Math.max(1, Math.min(20, Math.trunc(Number(a.qty) || 1)));
+  const rows = [];
+  for (let i = 0; i < qty; i++) rows.push({ 'ID': id_(), 'Key': 'manual|' + id_(), 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': item['ID'], 'Item': item['Name'],
+    'Recognition': item['Name'], 'Earned': '', 'Status': status, 'Source': 'Manual', 'Added': now, 'Note': String(a.note || '').slice(0, 200),
+    'Status changed': now, 'Status changed by': me.email });
+  appendRows_('awards', rows);
+  return { ids: rows.map(r => r['ID']) };
+}
+
+/** Hand out pending or owed awards now (logs them from the closet), or remove them. */
+function setAwards_(me, a) {
+  const ids = new Set((a.ids || []).map(String));
+  const action = String(a.action);
+  if (['handOut', 'remove', 'owe', 'pending'].indexOf(action) < 0) throw apiError_('bad_request', 'Unknown action.');
+  const scouts = {}; readTable_('scouts').forEach(r => { scouts[String(r['ID'])] = r; });
+  const rows = readTable_('awards').filter(r => ids.has(String(r['ID'])) && r['Status'] !== 'Handed out' && r['Status'] !== 'Removed');
+  const ctx = giveContext_(), patches = [];
+  rows.forEach(r => {
+    const by = { 'Status changed': ctx.now, 'Status changed by': me.email };
+    if (action === 'handOut') {
+      const scout = scouts[String(r['Scout ID'])];
+      if (!scout) return;
+      const logId = giveOne_(me, ctx, scout, String(r['Item ID']), 1, `Court of honor: ${r['Recognition']}`, '');
+      patches.push([r._row, Object.assign({ 'Status': 'Handed out', 'Log ID': logId }, by)]);
+    } else patches.push([r._row, Object.assign({ 'Status': ({ remove: 'Removed', owe: 'Owed', pending: 'Pending' })[action] }, by)]);
+  });
+  appendRows_('log', ctx.logRows);
+  if (ctx.chargeRows.length) appendRows_('charges', ctx.chargeRows);
+  patches.forEach(([row, p]) => updateRow_('awards', row, p));
+  return { updated: patches.length };
+}
+
+/** Remember that a report label means this item (e.g. "Totin' Chip (Scouts BSA) (2024)" -> Totin' Chip card). */
+function matchReportName_(me, a) {
+  const label = cleanLabel_(a.label);
+  if (!label) throw apiError_('bad_request', 'Missing report name.');
+  const items = readTable_('items');
+  items.forEach(r => {
+    const names = splitNames_(r['Report names']);
+    const has = names.some(n => n.toLowerCase() === label.toLowerCase());
+    if (String(r['ID']) === String(a.itemId) && !has) updateRow_('items', r._row, { 'Report names': names.concat(label).join(' | ') });
+    else if (String(r['ID']) !== String(a.itemId) && has) updateRow_('items', r._row, { 'Report names': names.filter(n => n.toLowerCase() !== label.toLowerCase()).join(' | ') });
+  });
+  if (a.itemId) setIgnored_(label, false);
+  return true;
+}
+
+/** Report entries that aren't closet items (e.g. Palm #1, Recruiter Strip) are skipped from then on. */
+function ignoreReportName_(me, a) { const label = cleanLabel_(a.label); if (!label) throw apiError_('bad_request', 'Missing report name.'); setIgnored_(label, !a.undo); return true; }
+
+function setIgnored_(label, on) {
+  const cur = splitNames_(getSetting_('Ignored report items')).filter(n => n.toLowerCase() !== label.toLowerCase());
+  if (on) cur.push(label);
+  setSetting_('Ignored report items', cur.join(' | '));
+}
+function cleanLabel_(s) { return String(s || '').replace(/[%*]+\s*$/, '').replace(/\s+/g, ' ').trim().slice(0, 120); }
+function splitNames_(s) { return String(s || '').split('|').map(x => x.trim()).filter(Boolean); }
+function earnedTime_(s) { const m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/); if (!m) return 0; const y = Number(m[3]) < 100 ? 2000 + Number(m[3]) : Number(m[3]); return new Date(y, Number(m[1]) - 1, Number(m[2])).getTime(); }
 
 function restock_(me, a) {
   const lines = cleanLines_(a.lines), items = itemsById_(), now = new Date(), note = String(a.note || '').slice(0, 200);

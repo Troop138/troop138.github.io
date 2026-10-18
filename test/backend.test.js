@@ -189,6 +189,60 @@ test('new rows go right under the data, not under empty checkbox rows', () => {
   assert.strictEqual(lead[4][0], 'new@example.com');
 });
 
+// --- court of honor
+test('report import: unawarded rows become pending, once', () => {
+  const rows = [{ scoutId, itemId: 'i2', label: "Totin' Chip (Scouts BSA) (2024)", earned: '10/12/2026', awarded: false }];
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).pending, 1);
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).pending, 0, 'imported twice');
+  const d = ok(api(admin, 'getData'));
+  assert.strictEqual(d.awards.filter(a => a.status === 'Pending').length, 1);
+  assert.strictEqual(api(lee, 'importAwards', { rows }).code, 'forbidden');
+  assert.strictEqual(ok(api(lee, 'getData')).awards, undefined);
+});
+test('pending awards show as reserved on the item', () => {
+  assert.strictEqual(ok(api(lee, 'getData')).items.find(i => i.id === 'i2').reserved, 1);
+});
+test('re-import after Awarded: pending becomes handed out and leaves stock', () => {
+  ok(api(admin, 'restock', { lines: [{ itemId: 'i2', qty: 3 }] }));
+  const q = () => ok(api(admin, 'getData')).log.filter(l => l.itemId === 'i2').reduce((s, l) => s + l.delta, 0);
+  const before = q();
+  const r = ok(api(admin, 'importAwards', { rows: [{ scoutId, itemId: 'i2', label: "Totin' Chip (Scouts BSA) (2024)", earned: '10/12/2026', awarded: true }] }));
+  assert.strictEqual(r.handedOut, 1);
+  assert.strictEqual(q(), before - 1);
+  const d = ok(api(admin, 'getData'));
+  assert.strictEqual(d.awards.length, 0);
+  assert.ok(d.log.some(l => /Court of honor: Totin/.test(l.note)));
+});
+test('awarded but never picked up goes to Owed, not the log', () => {
+  const rows = [{ scoutId, itemId: 'i1', label: 'Tenderfoot', earned: '09/01/2026', awarded: false }];
+  ok(api(admin, 'importAwards', { rows }));
+  const logs = ok(api(admin, 'getData')).log.length;
+  const r = ok(api(admin, 'importAwards', { rows: [Object.assign({}, rows[0], { awarded: true, handedOut: false })] }));
+  assert.strictEqual(r.owed, 1);
+  const d = ok(api(admin, 'getData'));
+  assert.strictEqual(d.log.length, logs);
+  const owed = d.awards.find(a => a.status === 'Owed'); assert.ok(owed);
+  ok(api(admin, 'setAwards', { ids: [owed.id], action: 'handOut' }));
+  assert.strictEqual(ok(api(admin, 'getData')).log.length, logs + 1);
+});
+test('old awarded history is ignored unless a since-date is given', () => {
+  const rows = [{ scoutId, itemId: 'i3', label: 'Merit badge sash', earned: '01/05/2019', awarded: true }];
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).handedOut, 0);
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows, since: new Date(2018, 0, 1).getTime() })).handedOut, 1);
+});
+test('manual award and remove', () => {
+  const r = ok(api(admin, 'addAward', { scoutId, itemId: 'i1', qty: 2 }));
+  assert.strictEqual(r.ids.length, 2);
+  ok(api(admin, 'setAwards', { ids: r.ids, action: 'remove' }));
+  assert.ok(!ok(api(admin, 'getData')).awards.some(a => r.ids.includes(a.id)));
+});
+test('report names map to items and can be ignored', () => {
+  ok(api(admin, 'matchReportName', { itemId: 'i2', label: "Totin' Chip (Scouts BSA) (2024) %" }));
+  assert.deepStrictEqual(ok(api(admin, 'getData')).items.find(i => i.id === 'i2').reportNames, ["Totin' Chip (Scouts BSA) (2024)"]);
+  ok(api(admin, 'ignoreReportName', { label: 'Palm #1 %' }));
+  assert.deepStrictEqual(ok(api(admin, 'getData')).ignoredReportNames, ['Palm #1']);
+});
+
 // --- leaders
 test('removing a leader signs them out', () => {
   ok(api(admin, 'saveLeader', { email: 'lee@example.com', name: 'Lee', role: 'Leader', active: false }));

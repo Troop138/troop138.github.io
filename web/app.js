@@ -19,6 +19,7 @@ const S = {
   tab: 'give', sub: '', q: '', cat: 'all',
   give: { scoutId: null, cart: {} }, restock: { cart: {}, note: '' },
   scoutQ: '', pendingDel: null,
+  awards: [], awardKeys: new Set(), ignoredReport: [], coh: { file: '', rows: null, since: '', useSince: false, owe: {}, addFor: '' },
   report: '', rep: { range: '30', from: '', to: '', group: 'item', scout: '', status: 'Pending', sel: {} },
   labels: { sel: {}, size: 'small' },
 };
@@ -50,7 +51,10 @@ const isRole = (...r) => S.me && r.includes(S.me.role);
 const activeItems = () => [...S.items.values()].filter(i => i.active);
 const activeScouts = () => [...S.scouts.values()].filter(s => s.active).sort(byName);
 const qtyOf = id => S.qty.get(id) || 0;
-function status(it) { const q = qtyOf(it.id); if (q <= 0) return 'out'; if (it.reorder > 0 && q <= it.reorder) return 'low'; return 'ok'; }
+// Reserved = pending court-of-honor awards set aside for a scout. Available = on hand minus reserved.
+const reservedOf = id => ((S.items.get(id) || {}).reserved || 0);
+const availOf = id => qtyOf(id) - reservedOf(id);
+function status(it) { const q = availOf(it.id); if (q <= 0) return 'out'; if (it.reorder > 0 && q <= it.reorder) return 'low'; return 'ok'; }
 function leaderName(email) { const l = S.leaders.find(x => x.email === email); return (l && l.name) || who(email); }
 
 const ICONS = {
@@ -99,6 +103,7 @@ async function refresh() {
     S.items = new Map(d.items.map(i => [i.id, i]));
     S.scouts = new Map(d.scouts.map(s => [s.id, s]));
     S.log = d.log; S.charges = d.charges; S.leaders = d.leaders || [];
+    S.awards = d.awards || []; S.awardKeys = new Set(d.awardKeys || []); S.ignoredReport = d.ignoredReportNames || [];
     const m = new Map(); for (const l of S.log) m.set(l.itemId, (m.get(l.itemId) || 0) + l.delta); S.qty = m;
     S.error = '';
   } catch (e) { if (e.code !== 'unauthorized') S.error = e.message; else return; }
@@ -256,6 +261,7 @@ function itemSub(it) {
   const s = status(it);
   return el('div', { class: 'sub' },
     it.cat === 'Eagle-required merit badge' ? el('span', { class: 'pill eagle', text: 'Eagle req.' }) : null,
+    it.reserved ? el('span', { class: 'pill', text: `${it.reserved} reserved` }) : null,
     s === 'out' ? el('span', { class: 'pill out', text: 'Out' }) : s === 'low' ? el('span', { class: 'pill low', text: 'Low' }) : null,
     it.cost > 0 ? el('span', { text: money(it.cost) + (it.rule === 'Free' ? '' : it.rule === 'Always charge' ? ' · charged' : ' · first free') }) : null);
 }
@@ -278,8 +284,8 @@ function viewStock() {
     return;
   }
   const low = all.filter(i => status(i) === 'low').length, out = all.filter(i => status(i) === 'out').length;
-  const units = all.reduce((a, i) => a + Math.max(0, qtyOf(i.id)), 0);
-  v.append(el('p', { class: 'muted mini', style: 'margin:12px 2px 0' }, `${all.length} items · ${units} on the shelf · `,
+  const units = all.reduce((a, i) => a + Math.max(0, qtyOf(i.id)), 0), resv = all.reduce((a, i) => a + (i.reserved || 0), 0);
+  v.append(el('p', { class: 'muted mini', style: 'margin:12px 2px 0' }, `${all.length} items · ${units} on the shelf · ${resv ? resv + ' reserved · ' : ''}`,
     el('span', { style: 'color:var(--warn-fg);font-weight:600', text: `${low} low` }), ', ',
     el('span', { style: 'color:var(--bad-fg);font-weight:600', text: `${out} out` })));
   const items = filteredItems(), list = el('div', { class: 'list' });
@@ -287,7 +293,7 @@ function viewStock() {
   for (const [c, g] of grouped(items)) {
     list.append(el('div', { class: 'group-h', text: CAT_SHORT[c] }));
     for (const it of g) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => itemSheet(it.id) },
-      el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }), itemSub(it)), el('div', { class: 'qty', text: String(qtyOf(it.id)) })));
+      el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }), itemSub(it)), el('div', { class: 'qty', text: String(availOf(it.id)) })));
   }
   v.append(list);
   if (isRole('Admin')) v.append(el('div', { style: 'display:flex;justify-content:center;padding-top:20px' }, el('button', { class: 'btn', type: 'button', onclick: () => itemForm() }, '+ Add item')));
@@ -324,10 +330,11 @@ function cartRows(cart, mode) {
   for (const [c, g] of grouped(items)) {
     list.append(el('div', { class: 'group-h', text: CAT_SHORT[c] }));
     for (const it of g) {
-      const line = cart[it.id], n = line ? line.n : 0, have = qtyOf(it.id), short = mode === 'give' && n > have;
+      const line = cart[it.id], n = line ? line.n : 0, have = mode === 'give' ? availOf(it.id) : qtyOf(it.id), short = mode === 'give' && n > have;
+      const resNote = it.reserved ? ` (${it.reserved} reserved)` : '';
       const set = k => { addToCart(cart, it.id, k); render(); };
       const main = el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }),
-        el('div', { class: 'onhand' + (short ? ' short' : ''), text: short ? `Only ${have} on hand` : `${have} on hand` + (mode === 'restock' && n ? ` → ${have + n}` : '') }));
+        el('div', { class: 'onhand' + (short ? ' short' : ''), text: mode === 'give' ? (short ? `Only ${have} available${resNote}` : `${have} available${resNote}`) : `${have} on hand` + (mode === 'restock' && n ? ` → ${have + n}` : '') }));
       if (mode === 'give' && n) {
         const cq = chargedQty(it, S.give.scoutId, n);
         if (cq > 0) {
@@ -671,7 +678,7 @@ function itemSheet(id) {
 
     return el('div', { style: 'display:contents' },
       sheetHead(it.name, `${it.cat} · ${it.cost > 0 ? money(it.cost) + ' · ' + it.rule : 'No cost set'}`),
-      el('div', { class: 'bigqty' }, el('span', { class: 'qty', text: String(q) }), el('span', { class: 'muted', text: 'on hand' }), itemSub(it)),
+      el('div', { class: 'bigqty' }, el('span', { class: 'qty', text: String(availOf(id)) }), el('span', { class: 'muted', text: it.reserved ? `available · ${q} on the shelf, ${it.reserved} reserved for court of honor` : 'on hand' }), itemSub(it)),
       el('div', { class: 'rowbtns' },
         el('button', { class: 'btn primary', type: 'button', onclick: () => { closeSheet(); S.tab = 'give'; S.q = it.name; S.cat = 'all'; render(true); } }, 'Give out'),
         el('button', { class: 'btn', type: 'button', onclick: () => { closeSheet(); S.tab = 'restock'; S.q = it.name; S.cat = 'all'; addToCart(S.restock.cart, id, 1); render(true); } }, 'Restock')),
@@ -808,22 +815,23 @@ function downloadCSV(name, t) {
 }
 function repInventory() {
   const items = activeItems().sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat) || byName(a, b));
-  const rows = items.map(i => { const q = qtyOf(i.id); return [i.name, i.cat, q, money(i.cost), money(Math.max(0, q) * i.cost), ({ ok: 'OK', low: 'Low', out: 'Out' })[status(i)]]; });
+  const rows = items.map(i => { const q = qtyOf(i.id); return [i.name, i.cat, q, i.reserved || 0, availOf(i.id), money(i.cost), money(Math.max(0, q) * i.cost), ({ ok: 'OK', low: 'Low', out: 'Out' })[status(i)]]; });
+  const resv = items.reduce((s, i) => s + (i.reserved || 0), 0);
   const value = items.reduce((s, i) => s + Math.max(0, qtyOf(i.id)) * i.cost, 0);
   const units = items.reduce((s, i) => s + Math.max(0, qtyOf(i.id)), 0);
   return {
-    kpis: [['Items', items.length], ['On the shelf', units], ['Shelf value', money(value)], ['Low or out', items.filter(i => status(i) !== 'ok').length]],
-    table: { cols: ['Item', 'Category', 'On hand', 'Cost', 'Value', 'Status'], num: [2, 3, 4], rows, total: ['Total', '', units, '', money(value), ''] },
+    kpis: [['Items', items.length], ['On the shelf', units], ['Reserved', resv], ['Shelf value', money(value)], ['Low or out', items.filter(i => status(i) !== 'ok').length]],
+    table: { cols: ['Item', 'Category', 'On hand', 'Reserved', 'Available', 'Cost', 'Value', 'Status'], num: [2, 3, 4, 5, 6], rows, total: ['Total', '', units, resv, units - resv, '', money(value), ''] },
   };
 }
 function repReorder() {
   const items = activeItems().filter(i => status(i) !== 'ok').sort(byName);
-  const rows = items.map(i => { const q = qtyOf(i.id), target = i.stockTo || i.reorder * 2 || 1, need = Math.max(target - q, 0); return [i.name, i.cat, q, i.reorder, target, need, money(need * i.cost)]; });
-  const units = rows.reduce((s, r) => s + r[5], 0), cost = items.reduce((s, i) => { const t = i.stockTo || i.reorder * 2 || 1; return s + Math.max(t - qtyOf(i.id), 0) * i.cost; }, 0);
+  const rows = items.map(i => { const q = availOf(i.id), target = i.stockTo || i.reorder * 2 || 1, need = Math.max(target - q, 0); return [i.name, i.cat, q, i.reorder, target, need, money(need * i.cost)]; });
+  const units = rows.reduce((s, r) => s + r[5], 0), cost = items.reduce((s, i) => { const t = i.stockTo || i.reorder * 2 || 1; return s + Math.max(t - availOf(i.id), 0) * i.cost; }, 0);
   return {
     subtitle: 'Items at or below their reorder level',
     kpis: [['Items to buy', items.length], ['Units', units], ['Estimated cost', money(cost)]],
-    table: { cols: ['Item', 'Category', 'On hand', 'Reorder at', 'Stock up to', 'Buy', 'Est. cost'], num: [2, 3, 4, 5, 6], rows, total: ['Total', '', '', '', '', units, money(cost)] },
+    table: { cols: ['Item', 'Category', 'Available', 'Reorder at', 'Stock up to', 'Buy', 'Est. cost'], num: [2, 3, 4, 5, 6], rows, total: ['Total', '', '', '', '', units, money(cost)] },
   };
 }
 function rangeBounds() {
@@ -952,7 +960,7 @@ function viewMore() {
   const sub = S.sub;
   if (sub) {
     v.append(el('div', { style: 'margin-top:12px' }, el('button', { class: 'btn small', type: 'button', onclick: () => { S.sub = ''; render(); } }, '‹ More')));
-    ({ scouts: viewScouts, history: viewHistory, labels: viewLabels, admin: viewAdmin, share: viewShare })[sub](v);
+    ({ scouts: viewScouts, history: viewHistory, labels: viewLabels, admin: viewAdmin, share: viewShare, coh: viewCoh })[sub](v);
     return;
   }
   const items = [
@@ -960,7 +968,7 @@ function viewMore() {
     ['history', 'History', 'Recent entries, and undo your own'],
     ['labels', 'Print labels', 'Barcode stickers for bins and bags'],
     ['share', 'Share the app', 'QR code and link for other leaders'],
-    ...(isRole('Admin') ? [['admin', 'Leaders & access', 'Who can sign in, and their roles']] : []),
+    ...(isRole('Admin') ? [['coh', 'Court of honor', S.awards.length ? `${S.awards.filter(a => a.status === 'Pending').length} pending awards · import from Scoutbook` : 'Import awards from Scoutbook, pull lists'], ['admin', 'Leaders & access', 'Who can sign in, and their roles']] : []),
   ];
   v.append(el('div', { class: 'menu' }, items.map(([k, t, d]) => el('button', { type: 'button', class: 'row tap', onclick: () => { S.sub = k; render(); window.scrollTo(0, 0); } },
     el('div', { class: 'main' }, el('div', { class: 'name', text: t }), el('div', { class: 'sub', text: d })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })))));
@@ -1109,6 +1117,232 @@ function leaderSheet(email) {
       el('button', { class: 'btn primary', type: 'submit' }, 'Save'),
       email ? el('button', { class: 'btn', type: 'button', onclick: () => save('signOutEverywhere', { email }, `Signed ${l.name || email} out on every device`, closeSheet) }, 'Sign out everywhere') : null);
   });
+}
+
+/* ---------- Court of honor (admin) ---------- */
+const AWARD_TYPES = ['Merit Badge', 'Rank', 'Special Awards'];
+function parseCsv(text) {
+  const out = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); out.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); out.push(row); }
+  return out;
+}
+const cleanLabel = s => String(s || '').replace(/[%*]+\s*$/, '').replace(/\s+/g, ' ').trim();
+const normName = s => String(s || '').toLowerCase().replace(/[^a-z' -]/g, ' ').replace(/\s+/g, ' ').trim();
+const normItem = s => String(s || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/retired.*$/, ' ').replace(/\b(card|badge|merit badge|award|scouts bsa)\b/g, ' ').replace(/[^a-z0-9#']+/g, ' ').trim();
+const awardKey = (scoutId, label, earned) => [scoutId, String(label).trim().toLowerCase().replace(/\s+/g, ' '), String(earned || '').trim()].join('|');
+function earnedMs(s) { const m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/); if (!m) return 0; const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; return new Date(y, m[1] - 1, m[2]).getTime(); }
+
+/** Read the Troop Recognition Report into award rows. */
+function readReport(text) {
+  const rows = []; let lastName = '', lastPatrol = '';
+  for (const r of parseCsv(text)) {
+    if (r.length < 5 || r[0] === 'Patrol') continue;
+    const type = (r[2] || '').trim(); if (!AWARD_TYPES.includes(type)) continue;
+    const name = (r[1] || '').trim() || lastName, patrol = (r[0] || '').trim() || (r[1] ? '' : lastPatrol);
+    if (!name) continue;
+    lastName = name; lastPatrol = patrol;
+    rows.push({ name, patrol, type, raw: r[3], label: cleanLabel(r[3]), awarded: /%\s*$/.test(r[3] || ''), earned: (r[4] || '').trim() });
+  }
+  return rows;
+}
+function scoutMatcher() {
+  const exact = new Map(), byLast = new Map();
+  for (const s of S.scouts.values()) {
+    const p = normName(s.name).split(' '); if (p.length < 2) continue;
+    exact.set(p[0] + '|' + p[p.length - 1], s);
+    const k = p[p.length - 1]; byLast.set(k, (byLast.get(k) || []).concat(s));
+  }
+  return name => {
+    let p = normName(name).split(' ').filter(Boolean);
+    if (p.length > 2 && /^(jr|sr|ii|iii|iv)$/.test(p[p.length - 1])) p = p.slice(0, -1);
+    if (p.length < 2) return null;
+    const hit = exact.get(p[0] + '|' + p[p.length - 1]); if (hit) return hit;
+    const same = (byLast.get(p[p.length - 1]) || []).filter(s => normName(s.name)[0] === p[0][0]);
+    return same.length === 1 ? same[0] : null;
+  };
+}
+function itemMatcher() {
+  const ignored = new Set(S.ignoredReport.map(x => x.toLowerCase()));
+  const byReport = new Map(), byNorm = new Map();
+  for (const it of activeItems()) { it.reportNames.forEach(n => byReport.set(n.toLowerCase(), it)); byNorm.set(normItem(it.name), it); }
+  return label => {
+    const l = label.toLowerCase();
+    if (ignored.has(l)) return 'ignore';
+    return byReport.get(l) || byNorm.get(normItem(label)) || null;
+  };
+}
+
+/** Work out what an import would do, without changing anything. */
+function cohPreview() {
+  const C = S.coh; if (!C.rows) return null;
+  const findScout = scoutMatcher(), findItem = itemMatcher();
+  const since = C.useSince && C.since ? new Date(C.since + 'T00:00:00').getTime() : 0;
+  const open = new Map(S.awards.map(a => [a.key, a]));
+  const pend = [], done = [], badScouts = new Map(), badItems = new Map(), seen = new Set();
+  // The report lists a scout under every patrol they've been in, so the same award can appear more than once.
+  for (const r of C.rows) {
+    const relevant = !r.awarded || (since && earnedMs(r.earned) >= since);
+    const sc = findScout(r.name);
+    if (!sc) { if (relevant) badScouts.set(r.name, r.patrol); continue; }
+    const it = findItem(r.label);
+    const key = awardKey(sc.id, r.label, r.earned);
+    if (seen.has(key + '|' + r.awarded)) continue;
+    seen.add(key + '|' + r.awarded);
+    const isOpen = open.has(key) && open.get(key).status === 'Pending';
+    if (!(relevant || isOpen)) continue;
+    if (it === 'ignore') continue;
+    if (!it) { const b = badItems.get(r.label) || { label: r.label, type: r.type, n: 0 }; b.n++; badItems.set(r.label, b); continue; }
+    const row = { scoutId: sc.id, scoutName: sc.name, patrol: sc.patrol, itemId: it.id, itemName: it.name, label: r.label, earned: r.earned, awarded: r.awarded, key };
+    if (!r.awarded) { if (!S.awardKeys.has(key)) pend.push(row); }
+    else if (isOpen || !S.awardKeys.has(key)) done.push(row);
+  }
+  return { pend, done, badScouts: [...badScouts], badItems: [...badItems.values()].sort((a, b) => b.n - a.n), since };
+}
+
+function viewCoh(v) {
+  const C = S.coh;
+  v.append(el('h2', { style: 'margin-top:12px', text: 'Court of honor' }));
+  const file = el('input', { type: 'file', id: 'cohfile', accept: '.csv,text/csv', hidden: true });
+  file.onchange = () => { const f = file.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { C.rows = readReport(String(rd.result)); C.file = f.name; C.owe = {}; render(); }; rd.readAsText(f); };
+  if (!C.rows) {
+    v.append(el('div', { class: 'card stack', style: 'margin-top:12px' },
+      el('p', { style: 'margin:0', text: 'Upload the Troop Recognition Report from Scoutbook (CSV). Badges and ranks not yet marked Awarded become pending awards. After you mark them Awarded in Scoutbook, upload it again to log them as handed out.' }),
+      file, el('button', { class: 'btn primary', type: 'button', onclick: () => file.click() }, 'Upload recognition report')));
+  } else v.append(cohImport(file));
+  v.append(cohPending());
+}
+
+function cohImport(file) {
+  const C = S.coh, P = cohPreview();
+  const box = el('div', { class: 'card stack', style: 'margin-top:12px' });
+  box.append(el('div', { style: 'display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap' },
+    el('div', {}, el('h3', { text: 'Import' }), el('div', { class: 'mini muted', text: `${C.file} · ${C.rows.length} badges and ranks` })),
+    el('div', { class: 'rowbtns', style: 'flex:none' }, file, el('button', { class: 'btn small', type: 'button', onclick: () => file.click() }, 'Choose another'),
+      el('button', { class: 'btn small', type: 'button', onclick: () => { C.rows = null; render(); } }, 'Cancel'))));
+  const since = el('input', { id: 'cohsince', type: 'date', value: C.since });
+  since.onchange = () => { C.since = since.value; render(); };
+  const useSince = el('input', { id: 'cohusesince', type: 'checkbox', class: 'check' }); useSince.checked = C.useSince;
+  useSince.onchange = () => { C.useSince = useSince.checked; render(); };
+  box.append(el('label', { class: 'row', for: 'cohusesince', style: 'min-height:48px' }, useSince,
+    el('div', { class: 'main' }, el('div', { class: 'name', text: 'Also log items already awarded since…' }), el('div', { class: 'sub', text: "Only for catching up the first time. Leave off and older awards in the report are ignored." })),
+    C.useSince ? since : null));
+  if (P.badItems.length) {
+    const opts = () => [el('option', { value: '', text: 'Pick the closet item…' }), ...grouped(activeItems()).map(([c, g]) => el('optgroup', { label: CAT_SHORT[c] }, g.map(it => el('option', { value: it.id, text: it.name }))))];
+    box.append(el('div', { class: 'stack' }, el('h3', { style: 'color:var(--warn-fg)', text: `Match these report names (${P.badItems.length})` }),
+      el('p', { class: 'mini muted', style: 'margin:0', text: 'Pick the closet item for each, or mark it as not a closet item. The app remembers your choice.' }),
+      P.badItems.map(b => { const sel = el('select', { 'aria-label': 'Closet item for ' + b.label }, opts());
+        sel.onchange = () => { if (sel.value) save('matchReportName', { itemId: sel.value, label: b.label }, `${b.label} matched`); };
+        return el('div', { class: 'row', style: 'flex-wrap:wrap' }, el('div', { class: 'main' }, el('div', { class: 'name', text: b.label }), el('div', { class: 'sub', text: `${b.type} · ${b.n} scout${b.n > 1 ? 's' : ''}` })),
+          el('div', { class: 'rowbtns', style: 'flex:1;min-width:220px' }, sel, el('button', { class: 'btn small', type: 'button', onclick: () => save('ignoreReportName', { label: b.label }, `${b.label} will be skipped`) }, 'Not a closet item'))); })));
+  }
+  if (P.badScouts.length) box.append(el('div', { class: 'stack' }, el('h3', { style: 'color:var(--warn-fg)', text: `Not on the roster (${P.badScouts.length})` }),
+    el('p', { class: 'mini muted', style: 'margin:0', text: "These names have awards in the report but don't match a scout. Add them, or fix the name on the Scouts tab." }),
+    P.badScouts.map(([name, patrol]) => { const p = name.split(/\s+/).filter(Boolean);
+      return el('div', { class: 'row' }, el('div', { class: 'main' }, el('div', { class: 'name', text: name }), el('div', { class: 'sub', text: patrol || 'No patrol in report' })),
+        el('button', { class: 'btn small', type: 'button', onclick: () => save('addScout', { first: p[0], last: p[p.length - 1], patrol: patrol === 'Inactive' || patrol === 'InActive' ? '' : patrol }, `Added ${p[0]} ${p[p.length - 1]}`) }, 'Add to roster')); })));
+  if (P.done.length) {
+    const handed = P.done.filter(d => !C.owe[d.key]).length;
+    box.append(el('div', { class: 'stack' }, el('h3', { text: `Now awarded in Scoutbook (${P.done.length})` }),
+      el('p', { class: 'mini muted', style: 'margin:0', text: 'Ticked items are logged as handed out from the closet. Untick any the scout never picked up; they go on the Still owed list.' }),
+      groupBy(P.done, d => d.scoutName).map(([name, list]) => el('div', {}, el('div', { class: 'group-h', text: name }),
+        list.map(d => { const cb = el('input', { type: 'checkbox', class: 'check' }); cb.checked = !C.owe[d.key]; cb.onchange = () => { C.owe[d.key] = !cb.checked; render(); };
+          return el('label', { class: 'row', style: 'min-height:44px' }, cb, el('div', { class: 'main' }, el('div', { class: 'name', text: d.itemName }), el('div', { class: 'sub', text: [d.label !== d.itemName ? d.label : '', d.earned].filter(Boolean).join(' · ') }))); }))),
+      el('div', { class: 'mini muted', text: `${handed} handed out, ${P.done.length - handed} still owed` })));
+  }
+  if (P.pend.length) box.append(el('div', { class: 'stack' }, el('h3', { text: `New pending awards (${P.pend.length})` }),
+    el('div', { class: 'mini muted', text: groupBy(P.pend, d => d.scoutName).map(([n, l]) => `${n} (${l.length})`).join(', ') })));
+  const nothing = !P.pend.length && !P.done.length;
+  box.append(el('button', { class: 'btn primary', type: 'button', disabled: nothing || S.busy, onclick: async () => {
+    const rows = [...P.pend.map(d => ({ scoutId: d.scoutId, itemId: d.itemId, label: d.label, earned: d.earned, awarded: false })),
+      ...P.done.map(d => ({ scoutId: d.scoutId, itemId: d.itemId, label: d.label, earned: d.earned, awarded: true, handedOut: !C.owe[d.key] }))];
+    try { const r = await write('importAwards', { rows, since: P.since || 0 });
+      toast([r.pending && `${r.pending} new pending`, r.handedOut && `${r.handedOut} handed out`, r.owed && `${r.owed} still owed`].filter(Boolean).join(' · ') || 'Nothing new');
+      C.rows = null; C.owe = {}; render(); } catch (e) { fail(e); }
+  } }, nothing ? 'Nothing new to import' : `Import ${P.pend.length + P.done.length} award${P.pend.length + P.done.length > 1 ? 's' : ''}`));
+  return box;
+}
+function groupBy(list, fn) { const m = new Map(); list.forEach(x => { const k = fn(x); m.set(k, (m.get(k) || []).concat(x)); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]))); }
+
+function cohPending() {
+  const C = S.coh, wrap = el('div', { class: 'stack', style: 'margin-top:16px' });
+  const pending = S.awards.filter(a => a.status === 'Pending'), owed = S.awards.filter(a => a.status === 'Owed');
+  const sel = C.sel || (C.sel = {});
+  // stock check
+  const need = new Map(); pending.forEach(a => need.set(a.itemId, (need.get(a.itemId) || 0) + 1));
+  const short = [...need].map(([id, n]) => { const it = S.items.get(id); return { it, n, have: qtyOf(id) }; }).filter(x => x.it && x.n > x.have).sort((a, b) => byName(a.it, b.it));
+  wrap.append(el('div', { class: 'kpis' },
+    el('div', { class: 'kpi' }, el('div', { class: 'k', text: 'Pending awards' }), el('div', { class: 'v', text: pending.length })),
+    el('div', { class: 'kpi' }, el('div', { class: 'k', text: 'Scouts' }), el('div', { class: 'v', text: new Set(pending.map(a => a.scoutId)).size })),
+    el('div', { class: 'kpi' }, el('div', { class: 'k', text: 'Short on stock' }), el('div', { class: 'v', text: short.length })),
+    el('div', { class: 'kpi' }, el('div', { class: 'k', text: 'Still owed' }), el('div', { class: 'v', text: owed.length }))));
+  const pullTable = () => ({ cols: ['Patrol', 'Scout', 'Item', 'Report name', 'Earned'], rows: [...pending].sort((a, b) => (patrolOf(a) + a.scoutName).localeCompare(patrolOf(b) + b.scoutName) || a.itemName.localeCompare(b.itemName)).map(a => [patrolOf(a), a.scoutName, a.itemName, a.label, a.earned]) });
+  const shopTable = () => ({ cols: ['Item', 'Needed', 'On hand', 'Buy', 'Est. cost'], num: [1, 2, 3, 4], rows: short.map(x => [x.it.name, x.n, x.have, x.n - Math.max(0, x.have), money((x.n - Math.max(0, x.have)) * x.it.cost)]) });
+  wrap.append(el('div', { class: 'rowbtns' },
+    el('button', { class: 'btn', type: 'button', disabled: !pending.length, onclick: () => printNode(cohPullList(pending)) }, 'Print pull list'),
+    el('button', { class: 'btn', type: 'button', disabled: !pending.length, onclick: () => downloadCSV(`pull-list-${new Date().toISOString().slice(0, 10)}.csv`, pullTable()) }, 'Pull list CSV'),
+    el('button', { class: 'btn', type: 'button', disabled: !short.length, onclick: () => downloadCSV(`shopping-list-${new Date().toISOString().slice(0, 10)}.csv`, shopTable()) }, 'Shopping list CSV')));
+  if (short.length) wrap.append(el('div', { class: 'card stack' }, el('h3', { style: 'color:var(--bad-fg)', text: 'Not enough on the shelf' }),
+    short.map(x => el('div', { class: 'row', style: 'min-height:40px' }, el('div', { class: 'main' }, el('div', { class: 'name', text: x.it.name })), el('div', { class: 'mini', text: `need ${x.n}, have ${x.have}` })))));
+
+  const ids = Object.keys(sel).filter(k => sel[k] && S.awards.some(a => a.id === k));
+  const bar = el('div', { class: 'card rowbtns cohbar', style: 'position:sticky;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom,0px) + 8px);z-index:4;box-shadow:0 -4px 16px rgba(0,0,0,.08)' },
+    el('span', { class: 'mini ' + (ids.length ? '' : 'muted'), style: 'flex:1 1 100%;font-weight:600', text: ids.length ? `${ids.length} selected` : 'Tick awards to act on them' }),
+    el('button', { class: 'btn small primary', type: 'button', disabled: !ids.length, onclick: () => save('setAwards', { ids, action: 'handOut' }, `${ids.length} handed out`, () => { C.sel = {}; }) }, 'Hand out now'),
+    el('button', { class: 'btn small', type: 'button', disabled: !ids.length, onclick: () => save('setAwards', { ids, action: 'owe' }, `${ids.length} moved to Still owed`, () => { C.sel = {}; }) }, 'Mark owed'),
+    el('button', { class: 'btn small danger', type: 'button', disabled: !ids.length, onclick: () => save('setAwards', { ids, action: 'remove' }, `${ids.length} released back to inventory`, () => { C.sel = {}; }) }, 'Release to inventory'));
+  wrap.append(el('h3', { text: 'Pending awards' }), el('p', { class: 'mini muted', style: 'margin:0', text: 'Pending awards are reserved: they stay on the shelf but are not available for other give-outs. Hand them out, mark them owed (awarded but not picked up), or release them back to inventory.' }));
+  const pendSec = el('div', { class: 'stack', style: 'gap:12px' }); wrap.append(pendSec);
+  if (!pending.length) pendSec.append(el('div', { class: 'empty', text: 'No pending awards. Upload the recognition report to load them.' }));
+  const awardRow = a => { const cb = el('input', { type: 'checkbox', class: 'check', 'aria-label': `Select ${a.itemName} for ${a.scoutName}` }); cb.checked = !!sel[a.id]; cb.onchange = () => { sel[a.id] = cb.checked; render(); };
+    const have = qtyOf(a.itemId);
+    return el('label', { class: 'row', style: 'min-height:48px' }, cb, el('div', { class: 'main' }, el('div', { class: 'name', text: a.itemName }),
+      el('div', { class: 'sub' }, a.source === 'Manual' ? el('span', { class: 'pill', text: 'Added by hand' }) : null, a.label !== a.itemName ? el('span', { text: a.label }) : null, a.earned ? el('span', { text: a.earned }) : null, a.note ? el('span', { text: a.note }) : null)),
+      el('span', { class: 'mini ' + (have > 0 ? 'muted' : 'onhand short'), text: `${have} on hand` })); };
+  for (const [patrol, list] of groupBy(pending, patrolOf)) {
+    pendSec.append(el('div', { class: 'group-h', text: patrol || 'No patrol' }));
+    for (const [, items] of groupBy(list, a => a.scoutName)) {
+      pendSec.append(el('div', { class: 'card', style: 'padding:6px 12px' }, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:6px' },
+        el('strong', { text: items[0].scoutName }), el('button', { class: 'linkbtn', type: 'button', onclick: () => { items.forEach(a => { sel[a.id] = true; }); render(); } }, 'Select all')), items.map(awardRow)));
+    }
+  }
+  if (pending.length) pendSec.append(bar);
+  // add by hand
+  const scSel = el('select', { id: 'cohaddscout' }, el('option', { value: '', text: 'Scout…' }), activeScouts().map(s => el('option', { value: s.id, text: s.name })));
+  const itSel = el('select', { id: 'cohadditem' }, el('option', { value: '', text: 'Item…' }), grouped(activeItems()).map(([c, g]) => el('optgroup', { label: CAT_SHORT[c] }, g.map(it => el('option', { value: it.id, text: it.name })))));
+  const asOwed = el('select', { id: 'cohaddstatus' }, el('option', { value: 'Pending', text: 'Pending (hand out at next court of honor)' }), el('option', { value: 'Owed', text: 'Still owed (awarded, never picked up)' }));
+  wrap.append(el('div', { class: 'card stack' }, el('h3', { text: 'Add an award by hand' }),
+    el('p', { class: 'mini muted', style: 'margin:0', text: "For things that aren't in the Scoutbook report, or items a scout is still owed." }),
+    el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'cohaddscout', text: 'Scout' }), scSel), el('div', { class: 'field' }, el('label', { for: 'cohadditem', text: 'Item' }), itSel)),
+    el('div', { class: 'field' }, el('label', { for: 'cohaddstatus', text: 'Status' }), asOwed),
+    el('button', { class: 'btn', type: 'button', onclick: () => { if (!scSel.value || !itSel.value) { toast('Pick a scout and an item.'); return; } save('addAward', { scoutId: scSel.value, itemId: itSel.value, status: asOwed.value }, 'Added'); } }, 'Add')));
+  // owed
+  if (owed.length) {
+    wrap.append(el('h3', { text: `Still owed (${owed.length})` }), el('p', { class: 'mini muted', style: 'margin:0', text: 'Marked Awarded in Scoutbook but never picked up. Hand out when the scout comes back.' }));
+    for (const [name, items] of groupBy(owed, a => a.scoutName)) wrap.append(el('div', { class: 'card', style: 'padding:6px 12px' }, el('strong', { style: 'display:block;padding-top:6px', text: name }),
+      items.map(a => el('div', { class: 'row', style: 'min-height:48px' }, el('div', { class: 'main' }, el('div', { class: 'name', text: a.itemName }), el('div', { class: 'sub', text: [a.earned, a.note].filter(Boolean).join(' · ') })),
+        el('div', { class: 'confirm' }, el('button', { class: 'btn small primary', type: 'button', onclick: () => save('setAwards', { ids: [a.id], action: 'handOut' }, `${a.itemName} handed out to ${name}`) }, 'Hand out now'),
+          el('button', { class: 'btn small', type: 'button', 'aria-label': 'Remove', onclick: () => save('setAwards', { ids: [a.id], action: 'remove' }, 'Removed') }, '✕'))))));
+  }
+  return wrap;
+}
+function patrolOf(a) { const s = S.scouts.get(a.scoutId); return (s && s.patrol) || ''; }
+function cohPullList(pending) {
+  const root = el('div', {}, el('h2', { text: 'Court of honor pull list' }), el('p', { text: [S.settings.troopName, `${pending.length} awards`, 'Printed ' + new Date().toLocaleDateString()].filter(Boolean).join(' · ') }));
+  for (const [patrol, list] of groupBy(pending, patrolOf)) {
+    root.append(el('h3', { style: 'color:#000;margin:14px 0 4px;border-bottom:1px solid #999', text: patrol || 'No patrol' }));
+    for (const [name, items] of groupBy(list, a => a.scoutName)) root.append(el('div', { style: 'break-inside:avoid;margin:6px 0 10px' },
+      el('div', { style: 'font-weight:700', text: `☐ ${name} (${items.length})` }),
+      el('div', { style: 'margin-left:18px', text: items.map(a => a.itemName).sort().join(', ') })));
+  }
+  return root;
 }
 
 /* ---------- boot ---------- */
