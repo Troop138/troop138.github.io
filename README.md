@@ -109,7 +109,7 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 
 1. In this repo on GitHub, go to **Settings → Pages** and set **Source** to **GitHub Actions**.
 2. Commit the updated `web/config.js` and push to `main`. The workflow runs the tests and publishes `web/`.
-3. The site appears at `https://YOUR-ORG.github.io/troop-closet/`. Check **Settings → Pages → Enforce HTTPS** is on.
+3. The site appears at `https://YOUR-ORG.github.io/<repo-name>/`. If the repo is named `YOUR-ORG.github.io`, it's served at `https://YOUR-ORG.github.io/` instead. Check **Settings → Pages → Enforce HTTPS** is on.
 
 ### 7. Add leaders and set up items
 

@@ -7,5 +7,5 @@ window.CLOSET_CONFIG = {
   apiUrl: "https://script.google.com/macros/s/AKfycbzpBOj_jsxCrMDfsIn_IbS_r0yOxIYDK8VGZObZHrfQ2XqcUJbu4zH2nn-4RCJE6ho/exec",
 
   // OAuth client ID from Google Cloud console (see README, "Google sign-in").
-  googleClientId: "",
+  googleClientId: "804237375761-enmcfhgvtuck9sh7rtv04498h5lt742a.apps.googleusercontent.com",
 };
