@@ -201,10 +201,12 @@ function soon() {
 function render(full) {
   if (!$('#view')) return;
   const pending = S.charges.filter(c => c.status === 'Pending').length;
+  const rosterTodo = [...S.scouts.values()].filter(s => s.needsUpdate).length;
   document.querySelectorAll('nav.tabs button').forEach(b => {
     if (b.dataset.tab === S.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     const badge = b.querySelector('.badge');
     if (b.dataset.tab === 'reports') { badge.hidden = !(isRole('Admin', 'Treasurer') && pending); badge.textContent = pending; }
+    if (b.dataset.tab === 'more') { badge.hidden = !(isRole('Admin') && rosterTodo); badge.textContent = rosterTodo; }
   });
   const title = S.settings.appTitle || 'Troop Closet';
   $('#apptitle').firstChild.textContent = title; $('#railhead').textContent = title; document.title = title;
@@ -213,6 +215,9 @@ function render(full) {
   const banner = $('#banner'); banner.replaceChildren();
   if (DEMO) banner.append(el('div', { class: 'banner demo', text: 'Demo mode: sample data only. Changes disappear when you reload.' }));
   if (S.error) banner.append(el('div', { class: 'banner', text: "Couldn't load the closet: " + S.error }));
+  if (isRole('Admin') && rosterTodo && !(S.tab === 'more' && S.sub === 'scouts')) banner.append(el('div', { class: 'banner', style: 'display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap' },
+    el('span', { text: `${rosterTodo} new scout${rosterTodo > 1 ? 's need' : ' needs'} roster details updated.` }),
+    el('button', { class: 'btn small', type: 'button', onclick: () => go('more', 'scouts') }, 'Review')));
   if (full) renderToolbar();
   $('#layout').className = 'layout'; document.body.classList.remove('split'); $('#aside').replaceChildren();
   ({ stock: viewStock, give: viewGive, restock: viewRestock, reports: viewReports, more: viewMore })[S.tab]();
@@ -367,8 +372,8 @@ function viewGive() {
     for (const s of sc) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => pickScout(s.id) },
       el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), s.patrol ? el('div', { class: 'sub', text: s.patrol }) : null), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
     if (!activeScouts().length) list.append(el('div', { class: 'empty' }, el('strong', { text: 'No scouts yet' }), el('span', { text: 'Add the first scout below.' })));
-    else if (!sc.length) list.append(el('div', { class: 'empty', text: 'No scout by that name.' }));
-    v.append(list, addScoutInline(S.scoutQ, id => pickScout(id)));
+    else if (!sc.length) list.append(el('div', { class: 'empty', text: 'No scout by that name. New to the troop? Add them below.' }));
+    v.append(list, addScoutButton(S.scoutQ, id => pickScout(id)));
     return;
   }
   const s = S.scouts.get(g.scoutId);
@@ -404,16 +409,44 @@ function viewGive() {
 }
 function pickScout(id) { S.give.scoutId = id; S.give.cart = {}; S.q = ''; S.cat = 'all'; renderToolbar(); render(); window.scrollTo(0, 0); }
 
-function addScoutInline(prefill, then) {
-  const name = el('input', { class: 'search', id: 'newscout', placeholder: "New scout's name", value: prefill || '', autocomplete: 'off' });
-  const btn = el('button', { class: 'btn', type: 'submit' }, 'Add scout');
-  const go2 = async () => {
-    const nm = name.value.trim(); if (!nm) return name.focus();
-    btn.disabled = true;
-    try { const r = await write('addScout', { name: nm, patrol: '' }, `Added ${nm}`); S.scoutQ = ''; if (then) then(r.id); }
-    catch (e) { fail(e); btn.disabled = false; }
-  };
-  return el('form', { class: 'inline-add', onsubmit: e => { e.preventDefault(); go2(); } }, name, btn);
+function addScoutButton(prefill, then) {
+  return el('div', { style: 'display:flex;justify-content:center;padding-top:16px' },
+    el('button', { class: 'btn', type: 'button', onclick: () => scoutForm(prefill, then) }, '+ Add a scout'));
+}
+function patrols() { return [...new Set(activeScouts().map(s => s.patrol).filter(Boolean))].sort((a, b) => a.localeCompare(b)); }
+function patrolPicker(current) {
+  const list = patrols();
+  const sel = el('select', { id: 'fpatrol' }, el('option', { value: '', text: 'No patrol' }), list.map(p => el('option', { value: p, text: p })), el('option', { value: '__new', text: 'New patrol…' }));
+  const other = el('input', { id: 'fpatrolnew', placeholder: 'Patrol name', autocomplete: 'off', hidden: true });
+  if (current && !list.includes(current)) { sel.value = '__new'; other.value = current; other.hidden = false; } else sel.value = current || '';
+  sel.onchange = () => { other.hidden = sel.value !== '__new'; if (!other.hidden) other.focus(); };
+  return { node: el('div', { class: 'field' }, el('label', { for: 'fpatrol', text: 'Patrol' }), sel, other), value: () => sel.value === '__new' ? other.value.trim() : sel.value };
+}
+function scoutForm(prefill, then) {
+  const parts = String(prefill || '').trim().split(/\s+/).filter(Boolean);
+  openSheet(() => {
+    const first = el('input', { id: 'ffirst', value: parts[0] || '', autocomplete: 'off', autocapitalize: 'words' });
+    const last = el('input', { id: 'flast', value: parts.slice(1).join(' '), autocomplete: 'off', autocapitalize: 'words' });
+    const pp = patrolPicker('');
+    const btn = el('button', { class: 'btn primary', type: 'submit' }, 'Add scout');
+    return el('form', { style: 'display:contents', onsubmit: async e => {
+      e.preventDefault();
+      if (!first.value.trim()) return first.focus();
+      if (!last.value.trim()) return last.focus();
+      btn.disabled = true;
+      try {
+        const nm = `${first.value.trim()} ${last.value.trim()}`;
+        const r = await write('addScout', { first: first.value, last: last.value, patrol: pp.value() });
+        toast(r.needsUpdate ? `Added ${nm}. The closet admin has been asked to finish their roster details.` : `Added ${nm}`);
+        closeSheet(); S.scoutQ = ''; if (then) then(r.id); else render();
+      } catch (er) { fail(er); btn.disabled = false; }
+    } },
+      sheetHead('Add a scout'),
+      el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'ffirst', text: 'First name' }), first), el('div', { class: 'field' }, el('label', { for: 'flast', text: 'Last name' }), last)),
+      pp.node,
+      isRole('Admin') ? null : el('p', { class: 'mini muted', style: 'margin:0', text: "The closet admin gets a notice to add this scout's other details to the troop roster." }),
+      btn);
+  });
 }
 
 /* ---------- Restock ---------- */
@@ -942,14 +975,26 @@ function viewScouts(v) {
   if (!sc.length) list.append(el('div', { class: 'empty' }, el('strong', { text: 'No scouts yet' }), el('span', { text: 'Add scouts here or while giving out items.' })));
   for (const s of sc) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => scoutSheet(s.id) },
     el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: [s.patrol, `${got.get(s.id) || 0} items received`].filter(Boolean).join(' · ') })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
-  v.append(el('h2', { style: 'margin-top:12px', text: 'Scouts' }), addScoutInline(''), list);
+  const review = isRole('Admin') ? [...S.scouts.values()].filter(s => s.needsUpdate).sort(byName) : [];
+  v.append(el('h2', { style: 'margin-top:12px', text: 'Scouts' }));
+  if (review.length) {
+    v.append(el('div', { class: 'card stack', style: 'margin-top:12px;border-color:var(--warn-fg)' },
+      el('h3', { style: 'color:var(--warn-fg)', text: `Needs roster update (${review.length})` }),
+      el('p', { class: 'mini muted', style: 'margin:0', text: "Leaders added these scouts with just a name and patrol. Update their details on the troop roster, then mark them updated." }),
+      review.map(s => el('div', { class: 'row', style: 'min-height:52px' },
+        el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: [s.patrol, `added by ${leaderName(s.addedBy)}`, s.addedAt ? fmtDate(s.addedAt) : ''].filter(Boolean).join(' · ') })),
+        el('button', { class: 'btn small', type: 'button', onclick: () => save('updateScout', { id: s.id, updated: true }, `${s.name} marked updated`) }, 'Mark updated')))));
+  }
+  v.append(addScoutButton(''), list);
   const arch = [...S.scouts.values()].filter(s => !s.active).sort(byName);
   if (arch.length) { v.append(el('div', { class: 'group-h', text: 'Archived' })); arch.forEach(s => v.append(el('button', { type: 'button', class: 'row tap', onclick: () => scoutSheet(s.id) }, el('div', { class: 'main' }, el('div', { class: 'name muted', text: s.name }))))); }
 }
 function scoutSheet(id) {
   openSheet(() => {
     const s = S.scouts.get(id); if (!s) return null;
-    const name = el('input', { id: 'sname', value: s.name, autocomplete: 'off' }), patrol = el('input', { id: 'spatrol', value: s.patrol, placeholder: 'e.g. Panthers', autocomplete: 'off' });
+    const nameParts = s.name.split(/\s+/);
+    const first = el('input', { id: 'ffirst', value: nameParts[0] || '', autocomplete: 'off' }), last = el('input', { id: 'flast', value: nameParts.slice(1).join(' '), autocomplete: 'off' });
+    const pp = patrolPicker(s.patrol);
     const recv = S.log.filter(l => l.scoutId === id && l.kind === 'out').sort((a, b) => b.at - a.at);
     const ch = S.charges.filter(c => c.scoutId === id), pend = ch.filter(c => c.status === 'Pending').reduce((a, c) => a + c.amount, 0);
     return el('div', { style: 'display:contents' },
@@ -960,10 +1005,15 @@ function scoutSheet(id) {
         return el('div', { class: 'row', style: 'min-height:44px' }, el('div', { class: 'main' }, el('div', { class: 'name', text: (it ? it.name : l.itemName) + (l.delta < -1 ? ` ×${-l.delta}` : '') }),
           c ? el('div', { class: 'sub' }, el('span', { class: 'pill ' + c.status.toLowerCase(), text: `${c.status} ${money(c.amount)}` })) : null), el('div', { class: 'muted mini', text: fmtDate(l.at) }));
       }) : el('div', { class: 'muted mini', text: 'Nothing given out yet.' })),
-      el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); const nm = name.value.trim(); if (!nm) return name.focus(); save('updateScout', { id, name: nm, patrol: patrol.value.trim() }, 'Saved'); } },
-        el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'sname', text: 'Name' }), name), el('div', { class: 'field' }, el('label', { for: 'spatrol', text: 'Patrol' }), patrol)),
+      s.needsUpdate && isRole('Admin') ? el('div', { class: 'card stack', style: 'border-color:var(--warn-fg)' },
+        el('div', { class: 'mini', text: `Added by ${leaderName(s.addedBy)}${s.addedAt ? ' on ' + fmtDate(s.addedAt) : ''}. Their roster details still need updating.` }),
+        el('button', { class: 'btn', type: 'button', onclick: () => save('updateScout', { id, updated: true }, `${s.name} marked updated`) }, 'Mark roster updated')) : null,
+      isRole('Admin') ? el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); if (!first.value.trim()) return first.focus(); if (!last.value.trim()) return last.focus(); save('updateScout', { id, first: first.value, last: last.value, patrol: pp.value() }, 'Saved'); } },
+        el('h3', { text: 'Edit scout' }),
+        el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'ffirst', text: 'First name' }), first), el('div', { class: 'field' }, el('label', { for: 'flast', text: 'Last name' }), last)),
+        pp.node,
         el('div', { class: 'rowbtns' }, el('button', { class: 'btn', type: 'submit' }, 'Save'),
-          isRole('Admin') ? el('button', { class: 'btn danger', type: 'button', onclick: () => save('updateScout', { id, active: !s.active }, s.active ? `${s.name} archived. History is kept.` : `${s.name} restored`, closeSheet) }, s.active ? 'Archive scout' : 'Restore scout') : null)));
+          el('button', { class: 'btn danger', type: 'button', onclick: () => save('updateScout', { id, active: !s.active }, s.active ? `${s.name} archived. History is kept.` : `${s.name} restored`, closeSheet) }, s.active ? 'Archive scout' : 'Restore scout'))) : null);
   });
 }
 

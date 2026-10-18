@@ -68,6 +68,8 @@ function install(g) {
   g.tokeninfo = null; // set by tests
   g.UrlFetchApp = { fetch: () => ({ getResponseCode: () => (g.tokeninfo ? 200 : 400), getContentText: () => JSON.stringify(g.tokeninfo || {}) }) };
   g.ContentService = { MimeType: { JSON: 'json' }, createTextOutput: s => ({ setMimeType: () => ({ body: s }) }) };
+  g.sentMail = [];
+  g.MailApp = { sendEmail: m => g.sentMail.push(m) };
   if (!g.console) g.console = console;
   return { sheets, props, ss, Sheet };
 }

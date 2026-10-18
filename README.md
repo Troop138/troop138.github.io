@@ -34,9 +34,11 @@ Roles, set on the **Leaders** tab:
 
 | Role | Can |
 |---|---|
-| Leader | Give out, restock, shelf counts, add scouts, link barcodes, reports. Undo their own entries for 24 hours. |
+| Leader | Give out, restock, shelf counts, add scouts (first name, last name, patrol), link barcodes, reports. Undo their own entries for 24 hours. |
 | Treasurer | Everything a leader can, plus mark charges Posted or Waived. |
 | Admin | Everything, plus items, costs, charge rules, leaders, and removing any entry. |
+
+When a leader adds a scout, the scout is flagged **Needs roster update** and every admin gets an email. Admins see a notice in the app (More → Scouts), update the scout's details on the troop roster, then tap **Mark updated**. Only admins can edit or archive scouts.
 
 Charge rules, set per item:
 

@@ -86,7 +86,30 @@ test('leaders do not get the leader list or sheet link', () => {
 
 // --- stock + charges
 let scoutId;
-test('leader adds a scout', () => { scoutId = ok(api(lee, 'addScout', { name: 'Sam Rivera', patrol: 'Eagles' })).id; });
+test('leader adds a scout; it is flagged and admins get an email', () => {
+  const r = ok(api(lee, 'addScout', { first: 'Sam', last: 'Rivera', patrol: 'Eagles' }));
+  scoutId = r.id;
+  assert.strictEqual(r.needsUpdate, true);
+  const s = ok(api(admin, 'getData')).scouts.find(x => x.id === scoutId);
+  assert.strictEqual(s.name, 'Sam Rivera'); assert.strictEqual(s.needsUpdate, true); assert.strictEqual(s.addedBy, 'lee@example.com');
+  assert.strictEqual(ctx.sentMail.length, 1);
+  assert.strictEqual(ctx.sentMail[0].to, 'admin@example.com');
+  assert.ok(/Sam Rivera/.test(ctx.sentMail[0].subject));
+});
+test('first and last name are both required, and duplicates are refused', () => {
+  assert.strictEqual(api(lee, 'addScout', { first: 'Sam', last: '' }).code, 'bad_request');
+  assert.strictEqual(api(lee, 'addScout', { first: 'sam', last: 'rivera' }).code, 'conflict');
+});
+test('scouts an admin adds are not flagged and send no email', () => {
+  const before = ctx.sentMail.length;
+  const r = ok(api(admin, 'addScout', { first: 'Jo', last: 'Lee', patrol: '' }));
+  assert.strictEqual(r.needsUpdate, false); assert.strictEqual(ctx.sentMail.length, before);
+});
+test('only admins edit scouts or mark them updated', () => {
+  assert.strictEqual(api(lee, 'updateScout', { id: scoutId, first: 'Samuel', last: 'Rivera' }).code, 'forbidden');
+  ok(api(admin, 'updateScout', { id: scoutId, updated: true }));
+  assert.strictEqual(ok(api(admin, 'getData')).scouts.find(x => x.id === scoutId).needsUpdate, false);
+});
 test('restock adds to stock', () => {
   ok(api(lee, 'restock', { lines: [{ itemId: 'i1', qty: 5 }, { itemId: 'i2', qty: 4 }, { itemId: 'i3', qty: 2 }], note: 'Scout Shop' }));
 });

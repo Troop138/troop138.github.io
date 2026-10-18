@@ -19,7 +19,7 @@ const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
   items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Barcodes', 'Active'] },
-  scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active'] },
+  scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active', 'First name', 'Last name', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
@@ -128,6 +128,8 @@ function applyFormatting_(ss) {
 
   const sc = sheet_('scouts'), sh = headerMap_(sc);
   fillBlankActive_(sc, sh);
+  const nr = sh['Needs roster update'];
+  if (nr != null && lastDataRow_(sc) > 1) sc.getRange(2, nr + 1, lastDataRow_(sc) - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   fillBlankActive_(it, ih);
 
   const le = sheet_('leaders'), lh = headerMap_(le);
@@ -375,6 +377,8 @@ function getData_(me) {
   const items = readTable_('items').filter(r => r['ID']).map(itemOut_);
   const scouts = readTable_('scouts').filter(r => r['ID']).map(r => ({
     id: String(r['ID']), name: String(r['Name']), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
+    needsUpdate: r['Needs roster update'] === true || String(r['Needs roster update']).toUpperCase() === 'TRUE',
+    addedBy: String(r['Added by'] || ''), addedAt: time_(r['Added on']),
   }));
   const log = readTable_('log').filter(r => r['ID']).map(r => ({
     id: String(r['ID']), at: time_(r['When']), itemId: String(r['Item ID']), itemName: String(r['Item']),
@@ -504,21 +508,55 @@ function undo_(me, a) {
   return true;
 }
 
+/**
+ * Any leader can add a scout with first name, last name and patrol. Scouts
+ * added by someone other than an admin are flagged "Needs roster update" and
+ * the admins get an email, so the rest of the scout's details get updated.
+ */
 function addScout_(me, a) {
-  const name = String(a.name || '').trim();
-  if (!name) throw apiError_('bad_request', "Enter the scout's name.");
-  const row = { 'ID': id_(), 'Name': name.slice(0, 80), 'Patrol': String(a.patrol || '').trim().slice(0, 60), 'Active': true };
+  const first = String(a.first || '').trim().slice(0, 40), last = String(a.last || '').trim().slice(0, 40);
+  if (!first || !last) throw apiError_('bad_request', "Enter the scout's first and last name.");
+  const name = `${first} ${last}`;
+  const dup = readTable_('scouts').find(r => String(r['Name']).trim().toLowerCase() === name.toLowerCase());
+  if (dup) throw apiError_('conflict', dup['Active'] === false
+    ? `${name} is already on the roster but archived. Ask the closet admin to restore them.`
+    : `${name} is already on the roster.`);
+  const flag = me.role !== 'Admin';
+  const row = { 'ID': id_(), 'Name': name, 'First name': first, 'Last name': last, 'Patrol': String(a.patrol || '').trim().slice(0, 60),
+    'Active': true, 'Needs roster update': flag, 'Added by': me.email, 'Added on': new Date() };
   appendRows_('scouts', [row]);
-  return { id: row['ID'] };
+  if (flag) notifyAdmins_(`New scout added: ${name}`,
+    `${me.name} (${me.email}) added a scout to the closet:\n\n` +
+    `  ${name}${row['Patrol'] ? ' (' + row['Patrol'] + ')' : ''}\n\n` +
+    `Update their details on the troop roster, then mark them updated in the app: More > Scouts.\n`);
+  return { id: row['ID'], needsUpdate: flag };
+}
+
+/** Email every active admin. Never blocks the change that triggered it. */
+function notifyAdmins_(subject, body) {
+  try {
+    const to = readTable_('leaders').filter(r => r['Role'] === 'Admin' && r['Active'] !== false && r['Email']).map(r => String(r['Email']).trim());
+    if (!to.length) return;
+    const title = String(getSetting_('App title') || 'Troop Closet');
+    MailApp.sendEmail({ to: to.join(','), subject: `${title}: ${subject}`, body, name: title });
+  } catch (err) { console.error('notifyAdmins_ failed', err); }
 }
 
 function updateScout_(me, a) {
   const s = scoutById_(a.id);
   if (!s) throw apiError_('bad_request', 'That scout no longer exists.');
+  need_(me, ['Admin']); // leaders add scouts; only admins change them
   const patch = {};
-  if ('name' in a) { const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', "Enter the scout's name."); patch['Name'] = n.slice(0, 80); }
+  if ('first' in a || 'last' in a) {
+    const first = String(a.first || '').trim().slice(0, 40), last = String(a.last || '').trim().slice(0, 40);
+    if (!first || !last) throw apiError_('bad_request', "Enter the scout's first and last name.");
+    Object.assign(patch, { 'First name': first, 'Last name': last, 'Name': `${first} ${last}` });
+  } else if ('name' in a) {
+    const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', "Enter the scout's name."); patch['Name'] = n.slice(0, 80);
+  }
   if ('patrol' in a) patch['Patrol'] = String(a.patrol).trim().slice(0, 60);
-  if ('active' in a) { need_(me, ['Admin']); patch['Active'] = !!a.active; }
+  if ('active' in a) patch['Active'] = !!a.active;
+  if ('updated' in a) patch['Needs roster update'] = !a.updated;
   updateRow_('scouts', s._row, patch);
   return true;
 }
@@ -678,8 +716,8 @@ function appendRows_(k, objs) {
   const at = lastDataRow_(sh) + 1;
   if (at + rows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), at + rows.length - 1 - sh.getMaxRows() + 100);
   sh.getRange(at, 1, rows.length, width).setValues(rows);
-  if (h['Active'] != null && typeof SpreadsheetApp.newDataValidation === 'function') {
-    sh.getRange(at, h['Active'] + 1, rows.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  if (typeof SpreadsheetApp.newDataValidation === 'function') {
+    ['Active', 'Needs roster update'].forEach(c => { if (h[c] != null) sh.getRange(at, h[c] + 1, rows.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build()); });
   }
 }
 
