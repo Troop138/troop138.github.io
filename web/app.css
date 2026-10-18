@@ -123,7 +123,7 @@ nav.tabs .railhead{display:none}
 
 /* ---------- history, tables, reports ---------- */
 .delta{font-family:var(--f-display);font-weight:700;font-size:1.3rem;font-variant-numeric:tabular-nums;min-width:3ch;text-align:right}
-.delta.in{color:var(--in)} .delta.out{color:var(--out)} .delta.count{color:var(--brass)}
+.delta.in{color:var(--in)} .delta.out{color:var(--out)} .delta.count{color:var(--brass)} .delta.return{color:var(--in)}
 .confirm{display:flex;gap:6px;flex:none}
 .tablewrap{overflow-x:auto;margin-top:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 table.report{border-collapse:collapse;width:100%;font-size:.92rem;font-variant-numeric:tabular-nums}

@@ -20,7 +20,7 @@ const TABS = {
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
   items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Barcodes', 'Active', 'Report names'] },
   scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active', 'First name', 'Last name', 'Needs roster update', 'Added by', 'Added on'] },
-  log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost'] },
+  log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost', 'Returns'] },
   awards:   { name: 'Awards',   headers: ['ID', 'Key', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Recognition', 'Earned', 'Status', 'Source', 'Added', 'Log ID', 'Status changed', 'Status changed by', 'Note'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
@@ -29,15 +29,18 @@ const CATEGORIES = ['Rank', 'Eagle-required merit badge', 'Merit badge', 'Award 
 const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 const CHARGE_STATUSES = ['Pending', 'Posted', 'Waived'];
-const LOG_TYPES = ['out', 'in', 'count'];
-// Pending: earned, not yet handed out. Handed out: logged from the closet.
-// Owed: marked Awarded in Scoutbook but the scout never picked it up. Removed: ignore.
-const AWARD_STATUSES = ['Pending', 'Handed out', 'Owed', 'Removed'];
+const LOG_TYPES = ['out', 'in', 'count', 'return'];
+// Earned badges count as handed out (they go into the scout's envelope).
+// Handed out: logged from the closet. Returned: checked back in to stock.
+// Owed: checked back in, but the scout may still come looking for it.
+// Skipped: in the report but never logged (e.g. already given before the app). Removed: no longer owed.
+const AWARD_STATUSES = ['Handed out', 'Returned', 'Owed', 'Skipped', 'Removed'];
 
 const SETTINGS_DEFAULTS = [
   ['App title', 'Troop Closet', 'Shown at the top of the app after sign-in'],
   ['Troop name', '', 'For example: Troop 000. Shown after sign-in only'],
   ['Barcode prefix', 'TC-', 'Start of troop-made barcodes, e.g. TC-0001'],
+  ['Awards counted from', '', 'Badges earned before this date in the Scoutbook report are ignored (set on the first import)'],
   ['Next barcode number', 1, 'Updated by the app'],
   ['Google sign-in client ID', '', 'From Google Cloud console (see README)'],
   ['Session days', 30, 'How long a phone stays signed in'],
@@ -194,26 +197,21 @@ function buildReportTabs_(ss) {
   // Stock: on hand is always the sum of the Log, never typed in.
   let s = ss.getSheetByName('Stock') || ss.insertSheet('Stock', 0);
   s.clear(); s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
-  s.getRange('A1:I1').setValues([['Item', 'Category', 'On hand', 'Reserved', 'Available', 'Cost', 'Reorder at', 'Value', 'Status']]).setFontWeight('bold').setBackground('#e3e6da');
+  s.getRange('A1:G1').setValues([['Item', 'Category', 'On hand', 'Cost', 'Reorder at', 'Value', 'Status']]).setFontWeight('bold').setBackground('#e3e6da');
   s.setFrozenRows(1);
   const iId = `${items}!${L(ih, 'ID')}2:${L(ih, 'ID')}`;
-  const aw = TABS.awards.name, awh = headerMap_(sheet_('awards'));
   s.getRange('A2').setFormula(
     `=ARRAYFORMULA(IFERROR(SORT(FILTER({${items}!${L(ih, 'Name')}2:${L(ih, 'Name')}, ${items}!${L(ih, 'Category')}2:${L(ih, 'Category')}, ` +
     `SUMIF(${log}!${L(lh, 'Item ID')}2:${L(lh, 'Item ID')}, ${iId}, ${log}!${L(lh, 'Change')}2:${L(lh, 'Change')}), ` +
-    `COUNTIFS(${aw}!${L(awh, 'Item ID')}2:${L(awh, 'Item ID')}, ${iId}, ${aw}!${L(awh, 'Status')}2:${L(awh, 'Status')}, "Pending"), ` +
-    `SUMIF(${log}!${L(lh, 'Item ID')}2:${L(lh, 'Item ID')}, ${iId}, ${log}!${L(lh, 'Change')}2:${L(lh, 'Change')}) - ` +
-    `COUNTIFS(${aw}!${L(awh, 'Item ID')}2:${L(awh, 'Item ID')}, ${iId}, ${aw}!${L(awh, 'Status')}2:${L(awh, 'Status')}, "Pending"), ` +
     `${items}!${L(ih, 'Cost')}2:${L(ih, 'Cost')}, ${items}!${L(ih, 'Reorder at')}2:${L(ih, 'Reorder at')}}, ` +
     `${iId}<>"", ${items}!${L(ih, 'Active')}2:${L(ih, 'Active')}<>FALSE), 2, TRUE, 1, TRUE), ""))`);
-  // The array fills A:G: Item, Category, On hand, Reserved (pending awards), Available, Cost, Reorder at.
-  s.getRange('H2').setFormula('=ARRAYFORMULA(IF(A2:A="",,C2:C*F2:F))');
-  s.getRange('I2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(E2:E<=0,"Out",IF(E2:E<=G2:G,"Low","OK"))))');
-  s.getRange('F:F').setNumberFormat('$#,##0.00'); s.getRange('H:H').setNumberFormat('$#,##0.00');
+  s.getRange('F2').setFormula('=ARRAYFORMULA(IF(A2:A="",,C2:C*D2:D))');
+  s.getRange('G2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(C2:C<=0,"Out",IF(C2:C<=E2:E,"Low","OK"))))');
+  s.getRange('D:D').setNumberFormat('$#,##0.00'); s.getRange('F:F').setNumberFormat('$#,##0.00');
   s.setColumnWidth(1, 240); s.setColumnWidth(2, 200);
   s.setConditionalFormatRules([
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Out').setBackground('#f6d6cf').setFontColor('#8e2a18').setRanges([s.getRange('I2:I')]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Low').setBackground('#f6e7c4').setFontColor('#7a5410').setRanges([s.getRange('I2:I')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Out').setBackground('#f6d6cf').setFontColor('#8e2a18').setRanges([s.getRange('G2:G')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Low').setBackground('#f6e7c4').setFontColor('#7a5410').setRanges([s.getRange('G2:G')]).build(),
   ]);
   s.protect().setDescription('Stock is calculated from Items and Log. Edit those instead.').setWarningOnly(true);
 
@@ -317,6 +315,7 @@ const ACTIONS = {
   updateItem: (me, a) => withLock_(() => updateItem_(me, a)),
   linkBarcode: (me, a) => withLock_(() => linkBarcode_(me, a)),
   makeTroopBarcode: (me, a) => withLock_(() => makeTroopBarcode_(me, a)),
+  checkIn: (me, a) => withLock_(() => checkIn_(me, a)),
   importAwards: (me, a) => { need_(me, ['Admin']); return withLock_(() => importAwards_(me, a)); },
   addAward: (me, a) => { need_(me, ['Admin']); return withLock_(() => addAward_(me, a)); },
   setAwards: (me, a) => { need_(me, ['Admin']); return withLock_(() => setAwards_(me, a)); },
@@ -397,8 +396,7 @@ function need_(me, roles) {
 
 function getData_(me) {
   const awardRows = readTable_('awards');
-  const reserved = {}; awardRows.forEach(r => { if (r['Status'] === 'Pending') reserved[String(r['Item ID'])] = (reserved[String(r['Item ID'])] || 0) + 1; });
-  const items = readTable_('items').filter(r => r['ID']).map(r => Object.assign(itemOut_(r), { reserved: reserved[String(r['ID'])] || 0 }));
+  const items = readTable_('items').filter(r => r['ID']).map(itemOut_);
   const scouts = readTable_('scouts').filter(r => r['ID']).map(r => ({
     id: String(r['ID']), name: String(r['Name']), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
     needsUpdate: r['Needs roster update'] === true || String(r['Needs roster update']).toUpperCase() === 'TRUE',
@@ -407,7 +405,7 @@ function getData_(me) {
   const log = readTable_('log').filter(r => r['ID']).map(r => ({
     id: String(r['ID']), at: time_(r['When']), itemId: String(r['Item ID']), itemName: String(r['Item']),
     delta: Number(r['Change']) || 0, kind: String(r['Type']), scoutId: String(r['Scout ID'] || ''), scoutName: String(r['Scout'] || ''),
-    note: String(r['Note'] || ''), by: String(r['Logged by'] || ''), unitCost: Number(r['Unit cost']) || 0,
+    note: String(r['Note'] || ''), by: String(r['Logged by'] || ''), unitCost: Number(r['Unit cost']) || 0, returns: String(r['Returns'] || ''),
   }));
   const charges = readTable_('charges').filter(r => r['ID']).map(chargeOut_);
   const out = {
@@ -421,11 +419,15 @@ function getData_(me) {
     sheetUrl: me.role === 'Admin' ? SpreadsheetApp.getActive().getUrl() : '',
   };
   if (me.role === 'Admin') {
-    out.awards = awardRows.filter(r => r['ID'] && (r['Status'] === 'Pending' || r['Status'] === 'Owed')).map(r => ({
+    // Owed awards, plus the last 120 days of earned give-outs (so they can be checked back in).
+    const recent = Date.now() - 120 * 864e5;
+    out.awards = awardRows.filter(r => r['ID'] && (r['Status'] === 'Owed' || (r['Status'] === 'Handed out' && time_(r['Added']) >= recent))).map(r => ({
       id: String(r['ID']), key: String(r['Key']), scoutId: String(r['Scout ID']), scoutName: String(r['Scout']), itemId: String(r['Item ID']),
       itemName: String(r['Item']), label: String(r['Recognition']), earned: String(r['Earned'] || ''), status: String(r['Status']),
-      source: String(r['Source'] || ''), note: String(r['Note'] || ''), addedAt: time_(r['Added']),
+      source: String(r['Source'] || ''), note: String(r['Note'] || ''), addedAt: time_(r['Added']), logId: String(r['Log ID'] || ''),
+      changedAt: time_(r['Status changed']),
     }));
+    out.awardsSince = String(getSetting_('Awards counted from') || '');
     out.awardKeys = awardRows.filter(r => r['Key']).map(r => String(r['Key']));
     out.ignoredReportNames = splitNames_(getSetting_('Ignored report items'));
     out.leaders = readTable_('leaders').filter(r => r['Email']).map(r => ({
@@ -491,7 +493,8 @@ function giveOne_(me, ctx, scout, itemId, qty, note, waiveReason) {
   let charged = 0;
   if (rule === 'Always charge') charged = qty;
   else if (rule === 'First one free') {
-    const prior = ctx.log.filter(r => String(r['Scout ID']) === String(scout['ID']) && String(r['Item ID']) === itemId && r['Type'] === 'out')
+    // Items checked back in don't count as the scout's free one.
+    const prior = ctx.log.filter(r => String(r['Scout ID']) === String(scout['ID']) && String(r['Item ID']) === itemId && (r['Type'] === 'out' || r['Type'] === 'return'))
       .reduce((s, r) => s - (Number(r['Change']) || 0), 0);
     charged = prior > 0 ? qty : qty - 1;
   }
@@ -512,83 +515,101 @@ function awardKey_(scoutId, label, earned) {
 }
 
 /**
- * Import parsed rows from the Troop Recognition Report. The page matches report names to scouts and
- * report labels to items, and sends:
- *   rows: [{ scoutId, itemId, label, earned, awarded, handedOut }]
- *     awarded:   true when the report marks it awarded (%)
- *     handedOut: for awarded rows, false = never picked up (goes to Owed instead of the Log)
- *   since: optional time (ms). Awarded rows with no pending record are only logged if earned on/after it.
- * Not-yet-awarded rows become Pending. Awarded rows that were Pending are logged as given out.
+ * Import parsed rows from the Troop Recognition Report. Earned badges count as handed out
+ * (they go into the scout's envelope); anything not picked up is checked back in later.
+ * The page matches report names to scouts and report labels to items, and sends:
+ *   rows:  [{ scoutId, itemId, label, earned, skip }]   skip = record it but don't log it
+ *   since: 'YYYY-MM-DD'. Badges earned before it are ignored. Saved on the first import.
+ * The same badge (scout + report name + earned date) is never logged twice.
  */
 function importAwards_(me, a) {
   const rows = Array.isArray(a.rows) ? a.rows.slice(0, 5000) : [];
-  const since = Number(a.since) || 0;
+  const sinceStr = String(a.since || getSetting_('Awards counted from') || '').slice(0, 10);
+  const since = isoTime_(sinceStr);
+  if (!since) throw apiError_('bad_request', 'Pick the date to start counting badges from.');
+  if (!getSetting_('Awards counted from')) setSetting_('Awards counted from', sinceStr);
   const scouts = {}; readTable_('scouts').forEach(r => { if (r['ID']) scouts[String(r['ID'])] = r; });
-  const existing = {}; readTable_('awards').forEach(r => { if (r['Key']) existing[String(r['Key'])] = r; });
+  const keys = new Set(readTable_('awards').map(r => String(r['Key'])).filter(Boolean));
   const ctx = giveContext_();
-  const add = [], updates = [];
-  const out = { pending: 0, handedOut: 0, owed: 0, skipped: 0 };
+  const add = [];
+  const out = { handedOut: 0, skipped: 0, ignored: 0 };
   rows.forEach(r => {
     const scout = scouts[String(r.scoutId)], item = ctx.items[String(r.itemId)];
-    if (!scout || !item) { out.skipped++; return; }
     const label = String(r.label || '').trim().slice(0, 120), earned = String(r.earned || '').trim().slice(0, 20);
-    const key = awardKey_(scout['ID'], label, earned), ex = existing[key];
-    const base = { 'Key': key, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': item['ID'], 'Item': item['Name'], 'Recognition': label, 'Earned': earned, 'Source': 'Report' };
-    if (!r.awarded) {
-      if (!ex) { add.push(Object.assign({ 'ID': id_(), 'Status': 'Pending', 'Added': ctx.now }, base)); existing[key] = { 'Status': 'Pending' }; out.pending++; }
-      return;
-    }
-    const wasPending = ex && ex['Status'] === 'Pending';
-    const catchUp = !ex && since && earnedTime_(earned) >= since;
-    if (!wasPending && !catchUp) { out.skipped++; return; }
-    let patch;
-    if (r.handedOut === false) { patch = { 'Status': 'Owed', 'Status changed': ctx.now, 'Status changed by': me.email }; out.owed++; }
-    else {
-      const logId = giveOne_(me, ctx, scout, String(item['ID']), 1, `Court of honor: ${label}`, '');
-      patch = { 'Status': 'Handed out', 'Log ID': logId, 'Status changed': ctx.now, 'Status changed by': me.email }; out.handedOut++;
-    }
-    if (wasPending && ex._row) updates.push([ex._row, patch]);
-    else add.push(Object.assign({ 'ID': id_(), 'Added': ctx.now }, base, patch));
-    existing[key] = { 'Status': patch['Status'] };
+    if (!scout || !item || earnedTime_(earned) < since) { out.ignored++; return; }
+    const key = awardKey_(scout['ID'], label, earned);
+    if (keys.has(key)) { out.ignored++; return; }
+    keys.add(key);
+    const row = { 'ID': id_(), 'Key': key, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': item['ID'], 'Item': item['Name'],
+      'Recognition': label, 'Earned': earned, 'Source': 'Report', 'Added': ctx.now, 'Status changed': ctx.now, 'Status changed by': me.email };
+    if (r.skip) { row['Status'] = 'Skipped'; out.skipped++; }
+    else { row['Status'] = 'Handed out'; row['Log ID'] = giveOne_(me, ctx, scout, String(item['ID']), 1, `Earned: ${label}`, ''); out.handedOut++; }
+    add.push(row);
   });
   appendRows_('log', ctx.logRows);
   if (ctx.chargeRows.length) appendRows_('charges', ctx.chargeRows);
-  updates.forEach(([row, patch]) => updateRow_('awards', row, patch));
   appendRows_('awards', add);
   return out;
 }
 
-/** Add an item a scout should get that isn't in the report (manual pending, or owed). */
+/**
+ * Check items back in to stock (e.g. envelopes never picked up). Any leader.
+ * args: { logIds: [give-out log IDs], owed: true to keep a "still owed" note, note }
+ * Logs a +1 'return' against the same scout, waives a pending charge, and updates the award.
+ */
+function checkIn_(me, a) {
+  const ids = new Set((a.logIds || []).map(String));
+  if (!ids.size) return { returned: 0 };
+  const log = readTable_('log');
+  const already = new Set(log.filter(r => r['Type'] === 'return' && r['Returns']).map(r => String(r['Returns'])));
+  const outs = log.filter(r => ids.has(String(r['ID'])) && r['Type'] === 'out' && !already.has(String(r['ID'])));
+  const charges = readTable_('charges').filter(c => ids.has(String(c['Log ID'])));
+  if (charges.some(c => c['Status'] === 'Posted' && outs.some(o => String(o['ID']) === String(c['Log ID']))))
+    throw apiError_('conflict', 'The treasurer already posted a charge for one of these. Ask them to reverse it first.');
+  const now = new Date(), note = String(a.note || '').trim().slice(0, 200), owed = !!a.owed;
+  const rows = outs.map(o => ({ 'ID': id_(), 'When': now, 'Item ID': o['Item ID'], 'Item': o['Item'], 'Change': -(Number(o['Change']) || 0), 'Type': 'return',
+    'Scout ID': o['Scout ID'], 'Scout': o['Scout'], 'Note': note || (owed ? 'Checked back in, still owed' : 'Checked back in'), 'Logged by': me.email,
+    'Unit cost': o['Unit cost'], 'Returns': o['ID'] }));
+  appendRows_('log', rows);
+  const done = new Set(outs.map(o => String(o['ID'])));
+  charges.filter(c => done.has(String(c['Log ID'])) && c['Status'] === 'Pending')
+    .forEach(c => updateRow_('charges', c._row, { 'Status': 'Waived', 'Reason': 'Checked back in', 'Status changed': now, 'Status changed by': me.email }));
+  readTable_('awards').filter(r => done.has(String(r['Log ID'])))
+    .forEach(r => updateRow_('awards', r._row, { 'Status': owed ? 'Owed' : 'Returned', 'Status changed': now, 'Status changed by': me.email, 'Note': note || r['Note'] || '' }));
+  return { returned: rows.length, logIds: rows.map(r => r['ID']) };
+}
+
+/** Add a "still owed" note for a scout by hand (admin). */
 function addAward_(me, a) {
   const scout = scoutById_(a.scoutId), item = itemsById_()[String(a.itemId)];
   if (!scout) throw apiError_('bad_request', 'That scout no longer exists.');
   if (!item) throw apiError_('bad_request', 'That item no longer exists.');
-  const status = a.status === 'Owed' ? 'Owed' : 'Pending', now = new Date();
+  const now = new Date();
   const qty = Math.max(1, Math.min(20, Math.trunc(Number(a.qty) || 1)));
   const rows = [];
   for (let i = 0; i < qty; i++) rows.push({ 'ID': id_(), 'Key': 'manual|' + id_(), 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': item['ID'], 'Item': item['Name'],
-    'Recognition': item['Name'], 'Earned': '', 'Status': status, 'Source': 'Manual', 'Added': now, 'Note': String(a.note || '').slice(0, 200),
+    'Recognition': item['Name'], 'Earned': '', 'Status': 'Owed', 'Source': 'Manual', 'Added': now, 'Note': String(a.note || '').slice(0, 200),
     'Status changed': now, 'Status changed by': me.email });
   appendRows_('awards', rows);
   return { ids: rows.map(r => r['ID']) };
 }
 
-/** Hand out pending or owed awards now (logs them from the closet), or remove them. */
+/** Owed items: hand out now (logs it from the closet) or remove the note. */
 function setAwards_(me, a) {
   const ids = new Set((a.ids || []).map(String));
   const action = String(a.action);
-  if (['handOut', 'remove', 'owe', 'pending'].indexOf(action) < 0) throw apiError_('bad_request', 'Unknown action.');
+  if (['handOut', 'remove'].indexOf(action) < 0) throw apiError_('bad_request', 'Unknown action.');
   const scouts = {}; readTable_('scouts').forEach(r => { scouts[String(r['ID'])] = r; });
-  const rows = readTable_('awards').filter(r => ids.has(String(r['ID'])) && r['Status'] !== 'Handed out' && r['Status'] !== 'Removed');
+  const rows = readTable_('awards').filter(r => ids.has(String(r['ID'])) && r['Status'] === 'Owed');
   const ctx = giveContext_(), patches = [];
   rows.forEach(r => {
     const by = { 'Status changed': ctx.now, 'Status changed by': me.email };
     if (action === 'handOut') {
       const scout = scouts[String(r['Scout ID'])];
       if (!scout) return;
-      const logId = giveOne_(me, ctx, scout, String(r['Item ID']), 1, `Court of honor: ${r['Recognition']}`, '');
+      const logId = giveOne_(me, ctx, scout, String(r['Item ID']), 1, `Owed: ${r['Recognition']}`, '');
       patches.push([r._row, Object.assign({ 'Status': 'Handed out', 'Log ID': logId }, by)]);
-    } else patches.push([r._row, Object.assign({ 'Status': ({ remove: 'Removed', owe: 'Owed', pending: 'Pending' })[action] }, by)]);
+    } else patches.push([r._row, Object.assign({ 'Status': 'Removed' }, by)]);
   });
   appendRows_('log', ctx.logRows);
   if (ctx.chargeRows.length) appendRows_('charges', ctx.chargeRows);
@@ -621,6 +642,7 @@ function setIgnored_(label, on) {
 }
 function cleanLabel_(s) { return String(s || '').replace(/[%*]+\s*$/, '').replace(/\s+/g, ' ').trim().slice(0, 120); }
 function splitNames_(s) { return String(s || '').split('|').map(x => x.trim()).filter(Boolean); }
+function isoTime_(s) { const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : 0; }
 function earnedTime_(s) { const m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/); if (!m) return 0; const y = Number(m[3]) < 100 ? 2000 + Number(m[3]) : Number(m[3]); return new Date(y, Number(m[1]) - 1, Number(m[2])).getTime(); }
 
 function restock_(me, a) {
@@ -661,6 +683,14 @@ function undo_(me, a) {
   });
   const charges = readTable_('charges').filter(c => ids.has(String(c['Log ID'])));
   if (charges.some(c => c['Status'] === 'Posted')) throw apiError_('conflict', 'The treasurer already posted a charge for this entry. Ask them to reverse it first.');
+  // Undoing a check-in puts the award (and any waived charge) back the way it was.
+  const undone = new Set(log.filter(r => r['Type'] === 'return' && r['Returns']).map(r => String(r['Returns'])));
+  if (undone.size) {
+    readTable_('awards').filter(r => undone.has(String(r['Log ID'])) && (r['Status'] === 'Returned' || r['Status'] === 'Owed'))
+      .forEach(r => updateRow_('awards', r._row, { 'Status': 'Handed out', 'Status changed': new Date(), 'Status changed by': me.email }));
+    readTable_('charges').filter(c => undone.has(String(c['Log ID'])) && c['Status'] === 'Waived' && c['Reason'] === 'Checked back in')
+      .forEach(c => updateRow_('charges', c._row, { 'Status': 'Pending', 'Reason': '', 'Status changed': '', 'Status changed by': '' }));
+  }
   deleteRows_('charges', charges.map(c => c._row));
   deleteRows_('log', log.map(r => r._row));
   return true;

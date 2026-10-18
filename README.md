@@ -121,6 +121,17 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 4. Scan council barcodes as items come in. Make troop barcodes and print labels for anything without one.
 5. Use **More → Share the app** for a QR code leaders can scan, then have them add it to their home screen.
 
+## Court of honor (admins)
+
+More → Court of honor. Upload the Troop Recognition Report from Scoutbook (CSV).
+
+- Every badge, rank and award a scout has earned is logged as **handed out**: it leaves stock and goes in the scout's envelope. Whether Scoutbook says Awarded doesn't matter.
+- The first import asks for a start date. Badges earned before it are ignored. The date is saved as "Awards counted from" on the Settings tab.
+- Upload the report again any time. A badge (scout + report name + earned date) is only logged once. Untick one in the preview to skip it for good.
+- Report names that don't match an item get matched once (saved in the Items tab's "Report names" column) or marked "not a closet item".
+- **Envelopes** lists recent imports, with a printable envelope list. When you clean out envelopes nobody picked up, tick them and **Check back in** (back to stock, pending charge waived) or **Check in, still owed** (back to stock, and the scout goes on the Still owed list).
+- **Still owed** also shows on the scout's page, with a Hand out button. Any leader can check an item back in from a scout's page.
+
 ## Editing the sheet by hand
 
 The app reads columns by header name, so you can reorder columns, but don't rename headers.

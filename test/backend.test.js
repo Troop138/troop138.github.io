@@ -190,49 +190,69 @@ test('new rows go right under the data, not under empty checkbox rows', () => {
 });
 
 // --- court of honor
-test('report import: unawarded rows become pending, once', () => {
-  const rows = [{ scoutId, itemId: 'i2', label: "Totin' Chip (Scouts BSA) (2024)", earned: '10/12/2026', awarded: false }];
-  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).pending, 1);
-  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).pending, 0, 'imported twice');
+const onHand = id => ok(api(admin, 'getData')).log.filter(l => l.itemId === id).reduce((s, l) => s + l.delta, 0);
+test('report import: earned badges are logged as handed out, once', () => {
+  ok(api(admin, 'restock', { lines: [{ itemId: 'i3', qty: 3 }] }));
+  const before = onHand('i3');
+  const rows = [{ scoutId, itemId: 'i3', label: 'Merit badge sash', earned: '10/12/2026' }];
+  assert.strictEqual(api(admin, 'importAwards', { rows }).code, 'bad_request', 'first import needs a start date');
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows, since: '2026-09-01' })).handedOut, 1);
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).handedOut, 0, 'imported twice');
+  assert.strictEqual(onHand('i3'), before - 1);
   const d = ok(api(admin, 'getData'));
-  assert.strictEqual(d.awards.filter(a => a.status === 'Pending').length, 1);
+  assert.strictEqual(d.awardsSince, '2026-09-01');
+  assert.ok(d.log.some(l => l.note === 'Earned: Merit badge sash' && l.scoutId === scoutId));
+  assert.strictEqual(d.awards.filter(a => a.status === 'Handed out').length, 1);
+  assert.ok(!d.items[0].hasOwnProperty('reserved'));
   assert.strictEqual(api(lee, 'importAwards', { rows }).code, 'forbidden');
   assert.strictEqual(ok(api(lee, 'getData')).awards, undefined);
 });
-test('pending awards show as reserved on the item', () => {
-  assert.strictEqual(ok(api(lee, 'getData')).items.find(i => i.id === 'i2').reserved, 1);
+test('badges earned before the start date are ignored; skipped rows are remembered', () => {
+  const r = ok(api(admin, 'importAwards', { rows: [
+    { scoutId, itemId: 'i1', label: 'Tenderfoot', earned: '01/05/2019' },
+    { scoutId, itemId: 'i1', label: 'Tenderfoot', earned: '09/15/2026', skip: true }] }));
+  assert.deepStrictEqual([r.handedOut, r.skipped, r.ignored], [0, 1, 1]);
+  assert.strictEqual(ok(api(admin, 'importAwards', { rows: [{ scoutId, itemId: 'i1', label: 'Tenderfoot', earned: '09/15/2026' }] })).handedOut, 0);
 });
-test('re-import after Awarded: pending becomes handed out and leaves stock', () => {
-  ok(api(admin, 'restock', { lines: [{ itemId: 'i2', qty: 3 }] }));
-  const q = () => ok(api(admin, 'getData')).log.filter(l => l.itemId === 'i2').reduce((s, l) => s + l.delta, 0);
-  const before = q();
-  const r = ok(api(admin, 'importAwards', { rows: [{ scoutId, itemId: 'i2', label: "Totin' Chip (Scouts BSA) (2024)", earned: '10/12/2026', awarded: true }] }));
-  assert.strictEqual(r.handedOut, 1);
-  assert.strictEqual(q(), before - 1);
+test('check back in: returns to stock, waives the charge, can stay owed', () => {
   const d = ok(api(admin, 'getData'));
-  assert.strictEqual(d.awards.length, 0);
-  assert.ok(d.log.some(l => /Court of honor: Totin/.test(l.note)));
+  const aw = d.awards.find(a => a.itemId === 'i3' && a.status === 'Handed out');
+  assert.strictEqual(d.charges.find(c => c.logId === aw.logId).status, 'Pending');
+  const before = onHand('i3');
+  const r = ok(api(lee, 'checkIn', { logIds: [aw.logId], owed: true }));
+  assert.strictEqual(r.returned, 1);
+  assert.strictEqual(onHand('i3'), before + 1);
+  assert.strictEqual(ok(api(lee, 'checkIn', { logIds: [aw.logId] })).returned, 0, 'checked in twice');
+  const d2 = ok(api(admin, 'getData'));
+  assert.strictEqual(d2.charges.find(c => c.logId === aw.logId).status, 'Waived');
+  assert.strictEqual(d2.awards.find(a => a.id === aw.id).status, 'Owed');
+  const ret = d2.log.find(l => l.kind === 'return');
+  assert.strictEqual(ret.scoutId, scoutId); assert.strictEqual(ret.returns, aw.logId);
+  // undo the check-in puts it back
+  ok(api(lee, 'undo', { logIds: [ret.id] }));
+  const d3 = ok(api(admin, 'getData'));
+  assert.strictEqual(d3.awards.find(a => a.id === aw.id).status, 'Handed out');
+  assert.strictEqual(d3.charges.find(c => c.logId === aw.logId).status, 'Pending');
+  ok(api(lee, 'checkIn', { logIds: [aw.logId], owed: true }));
 });
-test('awarded but never picked up goes to Owed, not the log', () => {
-  const rows = [{ scoutId, itemId: 'i1', label: 'Tenderfoot', earned: '09/01/2026', awarded: false }];
-  ok(api(admin, 'importAwards', { rows }));
-  const logs = ok(api(admin, 'getData')).log.length;
-  const r = ok(api(admin, 'importAwards', { rows: [Object.assign({}, rows[0], { awarded: true, handedOut: false })] }));
-  assert.strictEqual(r.owed, 1);
-  const d = ok(api(admin, 'getData'));
-  assert.strictEqual(d.log.length, logs);
-  const owed = d.awards.find(a => a.status === 'Owed'); assert.ok(owed);
+test('owed items can be handed out later', () => {
+  const owed = ok(api(admin, 'getData')).awards.find(a => a.status === 'Owed');
+  const before = onHand(owed.itemId);
   ok(api(admin, 'setAwards', { ids: [owed.id], action: 'handOut' }));
-  assert.strictEqual(ok(api(admin, 'getData')).log.length, logs + 1);
+  assert.strictEqual(onHand(owed.itemId), before - 1);
+  assert.ok(!ok(api(admin, 'getData')).awards.some(a => a.id === owed.id && a.status === 'Owed'));
 });
-test('old awarded history is ignored unless a since-date is given', () => {
-  const rows = [{ scoutId, itemId: 'i3', label: 'Merit badge sash', earned: '01/05/2019', awarded: true }];
-  assert.strictEqual(ok(api(admin, 'importAwards', { rows })).handedOut, 0);
-  assert.strictEqual(ok(api(admin, 'importAwards', { rows, since: new Date(2018, 0, 1).getTime() })).handedOut, 1);
+test('first-one-free: a checked-in item does not use up the free one', () => {
+  const s2 = ok(api(admin, 'addScout', { first: 'Free', last: 'Test', patrol: 'Cobras' })).id;
+  const g = ok(api(admin, 'give', { scoutId: s2, lines: [{ itemId: 'i2', qty: 1 }] }));
+  assert.strictEqual(g.charged, 0);
+  ok(api(admin, 'checkIn', { logIds: g.logIds }));
+  assert.strictEqual(ok(api(admin, 'give', { scoutId: s2, lines: [{ itemId: 'i2', qty: 1 }] })).charged, 0);
 });
-test('manual award and remove', () => {
+test('owed note by hand, and remove', () => {
   const r = ok(api(admin, 'addAward', { scoutId, itemId: 'i1', qty: 2 }));
   assert.strictEqual(r.ids.length, 2);
+  assert.ok(ok(api(admin, 'getData')).awards.filter(a => r.ids.includes(a.id)).every(a => a.status === 'Owed'));
   ok(api(admin, 'setAwards', { ids: r.ids, action: 'remove' }));
   assert.ok(!ok(api(admin, 'getData')).awards.some(a => r.ids.includes(a.id)));
 });
