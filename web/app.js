@@ -1134,17 +1134,17 @@ function repReturns() {
   return { extra: retEnvelopes() };
 }
 
-/** Give-outs from the last 120 days that haven't been checked back in, by day. */
+/** Give-outs from the last year that haven't been checked back in, by day. */
 function retEnvelopes() {
   const R = S.ret, wrap = el('div', { class: 'stack', style: 'margin-top:12px' });
-  const since = Date.now() - 120 * 864e5;
+  const since = Date.now() - 365 * 864e5;
   const recent = S.log.filter(l => l.kind === 'out' && l.scoutId && l.at >= since && !S.returned.has(l.id)).sort((a, b) => b.at - a.at);
-  wrap.append(el('p', { class: 'mini muted', style: 'margin:0', text: 'Everything given out in the last 120 days. When you clean out envelopes nobody picked up, tick them and check them back in to stock.' }));
-  if (!recent.length) { wrap.append(el('div', { class: 'empty', text: 'Nothing given out in the last 120 days.' })); return wrap; }
+  wrap.append(el('p', { class: 'mini muted', style: 'margin:0', text: 'Everything given out in the last year. When you clean out envelopes nobody picked up, tick them and check them back in to stock.' }));
+  if (!recent.length) { wrap.append(el('div', { class: 'empty', text: 'Nothing given out in the last year.' })); return wrap; }
   const days = [...new Map(recent.map(l => [dayKey(l.at), l.at])).entries()];
   if (R.day !== 'all' && !days.some(([k]) => k === R.day)) R.day = days[0][0];
   const list = R.day === 'all' ? recent : recent.filter(l => dayKey(l.at) === R.day);
-  wrap.append(el('div', { class: 'chips' }, [...days.slice(0, 8).map(([k, t]) => [k, fmtShort(t)]), ['all', 'All']].map(([k, l]) =>
+  wrap.append(el('div', { class: 'chips' }, [...days.slice(0, 12).map(([k, t]) => [k, fmtShort(t)]), ['all', 'All']].map(([k, l]) =>
     el('button', { type: 'button', class: 'chip', 'aria-pressed': String(R.day === k), onclick: () => { R.day = k; R.sel = {}; render(); } }, l))));
   const sel = R.sel, ids = list.filter(l => sel[l.id]).map(l => l.id);
   const done = () => { R.sel = {}; render(); };
