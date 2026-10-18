@@ -1,0 +1,715 @@
+/**
+ * Troop Closet: data API for the advancement-closet web app.
+ *
+ * This script is bound to the inventory Google Sheet. It is deployed as a web
+ * app ("Execute as: Me", "Who has access: Anyone") and answers JSON requests
+ * from the page on GitHub Pages. Every request except `login` must carry a
+ * session token, and every session belongs to a leader listed on the Leaders
+ * tab. The sheet itself stays private to the account that owns it.
+ *
+ * See README.md for setup.
+ */
+
+/* =====================================================================
+ * Sheet layout. Code reads columns by header name, so columns can be
+ * reordered in the sheet without breaking anything. Don't rename headers.
+ * ===================================================================== */
+
+const TABS = {
+  settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
+  leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
+  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Barcodes', 'Active'] },
+  scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active'] },
+  log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost'] },
+  charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
+};
+
+const CATEGORIES = ['Rank', 'Eagle-required merit badge', 'Merit badge', 'Award & card', 'Other'];
+const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
+const ROLES = ['Admin', 'Leader', 'Treasurer'];
+const CHARGE_STATUSES = ['Pending', 'Posted', 'Waived'];
+const LOG_TYPES = ['out', 'in', 'count'];
+
+const SETTINGS_DEFAULTS = [
+  ['App title', 'Troop Closet', 'Shown at the top of the app after sign-in'],
+  ['Troop name', '', 'For example: Troop 000. Shown after sign-in only'],
+  ['Barcode prefix', 'TC-', 'Start of troop-made barcodes, e.g. TC-0001'],
+  ['Next barcode number', 1, 'Updated by the app'],
+  ['Google sign-in client ID', '', 'From Google Cloud console (see README)'],
+  ['Session days', 30, 'How long a phone stays signed in'],
+  ['Backups to keep', 12, 'Weekly copies kept in the backup folder'],
+  ['Backup folder ID', '', 'Filled in by setup'],
+];
+
+const STARTER_ITEMS = [
+  ...['Scout', 'Tenderfoot', 'Second Class', 'First Class', 'Star', 'Life', 'Eagle']
+    .map(n => [n, 'Rank', 'Free', n === 'Eagle' ? 1 : 3]),
+  ...['Camping', 'Citizenship in Society', 'Citizenship in the Community', 'Citizenship in the Nation',
+    'Citizenship in the World', 'Communication', 'Cooking', 'Cycling', 'Emergency Preparedness',
+    'Environmental Science', 'Family Life', 'First Aid', 'Hiking', 'Lifesaving', 'Personal Fitness',
+    'Personal Management', 'Sustainability', 'Swimming']
+    .map(n => [n, 'Eagle-required merit badge', 'First one free', 2]),
+  ...['Archery', 'Art', 'Astronomy', 'Canoeing', 'Chemistry', 'Chess', 'Climbing', 'Digital Technology',
+    'Engineering', 'Fingerprinting', 'Fire Safety', 'Fishing', 'Geocaching', 'Kayaking', 'Leatherwork',
+    'Metalwork', 'Orienteering', 'Photography', 'Pioneering', 'Programming', 'Rifle Shooting', 'Robotics',
+    'Search and Rescue', 'Shotgun Shooting', 'Space Exploration', 'Weather', 'Wilderness Survival',
+    'Wood Carving', 'Woodwork']
+    .map(n => [n, 'Merit badge', 'First one free', 1]),
+  ["Totin' Chip card", 'Award & card', 'First one free', 5],
+  ["Firem'n Chit card", 'Award & card', 'First one free', 5],
+  ['Rank wallet card', 'Award & card', 'Free', 5],
+  ['Merit badge sash', 'Award & card', 'Always charge', 2],
+];
+
+/* =====================================================================
+ * One-time setup. Run from the Apps Script editor: pick `setup`, click Run.
+ * Safe to run again; it only adds what is missing.
+ * ===================================================================== */
+
+function setup() {
+  const ss = SpreadsheetApp.getActive();
+  Object.keys(TABS).forEach(k => ensureTab_(ss, TABS[k]));
+
+  // Settings defaults.
+  const st = sheet_('settings');
+  const have = new Set(st.getRange(2, 1, Math.max(1, st.getLastRow() - 1), 1).getValues().flat().map(String));
+  const missing = SETTINGS_DEFAULTS.filter(r => !have.has(r[0]));
+  if (missing.length) st.getRange(st.getLastRow() + 1, 1, missing.length, 3).setValues(missing);
+  st.setColumnWidth(1, 200); st.setColumnWidth(2, 360); st.setColumnWidth(3, 360);
+
+  // First admin: the account running setup (the troop account).
+  const leaders = sheet_('leaders');
+  if (leaders.getLastRow() < 2) {
+    const me = Session.getEffectiveUser().getEmail();
+    if (me) leaders.appendRow([me.toLowerCase(), 'Troop account', 'Admin', true]);
+  }
+
+  // Starter item list at zero on hand.
+  const items = sheet_('items');
+  if (items.getLastRow() < 2) {
+    const rows = STARTER_ITEMS.map(([n, c, rule, re]) => [id_(), n, c, 0, rule, re, re * 2, '', true]);
+    items.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+
+  applyFormatting_(ss);
+  buildReportTabs_(ss);
+  ensureBackupFolder_();
+  ensureTriggers_();
+
+  ['Sheet1'].forEach(n => { const s = ss.getSheetByName(n); if (s && s.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(s); });
+  ss.setActiveSheet(ss.getSheetByName('Stock'));
+  return 'Setup complete';
+}
+
+function ensureTab_(ss, def) {
+  let sh = ss.getSheetByName(def.name);
+  if (!sh) sh = ss.insertSheet(def.name);
+  const width = def.headers.length;
+  const cur = sh.getLastColumn() ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String) : [];
+  if (!cur.filter(Boolean).length) {
+    sh.getRange(1, 1, 1, width).setValues([def.headers]);
+  } else {
+    // Add any header that is missing (columns added in a newer version).
+    const add = def.headers.filter(h => cur.indexOf(h) < 0);
+    if (add.length) sh.getRange(1, cur.length + 1, 1, add.length).setValues([add]);
+  }
+  sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold').setBackground('#e3e6da');
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function applyFormatting_(ss) {
+  const listRule = (vals) => SpreadsheetApp.newDataValidation().requireValueInList(vals, true).setAllowInvalid(false).build();
+  const check = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+
+  const it = sheet_('items'), ih = headerMap_(it);
+  col_(it, ih, 'Category').setDataValidation(listRule(CATEGORIES));
+  col_(it, ih, 'Charge rule').setDataValidation(listRule(CHARGE_RULES));
+  col_(it, ih, 'Active').setDataValidation(check);
+  col_(it, ih, 'Cost').setNumberFormat('$#,##0.00');
+
+  const sc = sheet_('scouts'), sh = headerMap_(sc);
+  col_(sc, sh, 'Active').setDataValidation(check);
+  // Existing rows written before validation: make blanks TRUE.
+  fillBlankActive_(sc, sh);
+  fillBlankActive_(it, ih);
+
+  const le = sheet_('leaders'), lh = headerMap_(le);
+  col_(le, lh, 'Role').setDataValidation(listRule(ROLES));
+  col_(le, lh, 'Active').setDataValidation(check);
+
+  const ch = sheet_('charges'), chh = headerMap_(ch);
+  col_(ch, chh, 'Status').setDataValidation(listRule(CHARGE_STATUSES));
+  col_(ch, chh, 'Amount').setNumberFormat('$#,##0.00');
+  col_(ch, chh, 'When').setNumberFormat('m/d/yyyy h:mm am/pm');
+  col_(ch, chh, 'Status changed').setNumberFormat('m/d/yyyy h:mm am/pm');
+
+  const lg = sheet_('log'), lgh = headerMap_(lg);
+  col_(lg, lgh, 'When').setNumberFormat('ddd m/d/yyyy h:mm am/pm');
+  col_(lg, lgh, 'Unit cost').setNumberFormat('$#,##0.00');
+
+  // Warn before editing things the app depends on.
+  protect_(lg.getRange('A:Z'), 'Log: change entries through the app (Shelf count, or delete in History) so every change is recorded.');
+  [[it, ih], [sc, sh], [ch, chh]].forEach(([s, h]) => protect_(col_(s, h, 'ID'), 'IDs link log entries to items and scouts. Changing one breaks those links.'));
+  protect_(col_(ch, chh, 'Amount'), 'Amounts are calculated when the item is given out.');
+}
+
+function fillBlankActive_(sh, h) {
+  const n = sh.getLastRow() - 1; if (n < 1) return;
+  const r = sh.getRange(2, h['Active'] + 1, n, 1), v = r.getValues();
+  const idCol = sh.getRange(2, (h['ID'] != null ? h['ID'] : h['Email']) + 1, n, 1).getValues();
+  let changed = false;
+  v.forEach((row, i) => { if (idCol[i][0] !== '' && row[0] === '') { row[0] = true; changed = true; } });
+  if (changed) r.setValues(v);
+}
+
+function protect_(range, description) {
+  const sh = range.getSheet();
+  const existing = sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).some(p => p.getDescription() === description && p.getRange().getA1Notation() === range.getA1Notation());
+  if (!existing) range.protect().setDescription(description).setWarningOnly(true);
+}
+
+function buildReportTabs_(ss) {
+  const items = TABS.items.name, log = TABS.log.name, ch = TABS.charges.name;
+  const ih = headerMap_(sheet_('items')), lh = headerMap_(sheet_('log')), chh = headerMap_(sheet_('charges'));
+  const L = (h, name) => colLetter_(h[name] + 1);
+
+  // Stock: on hand is always the sum of the Log, never typed in.
+  let s = ss.getSheetByName('Stock') || ss.insertSheet('Stock', 0);
+  s.clear(); s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
+  s.getRange('A1:G1').setValues([['Item', 'Category', 'On hand', 'Cost', 'Reorder at', 'Value', 'Status']]).setFontWeight('bold').setBackground('#e3e6da');
+  s.setFrozenRows(1);
+  const iId = `${items}!${L(ih, 'ID')}2:${L(ih, 'ID')}`;
+  s.getRange('A2').setFormula(
+    `=ARRAYFORMULA(IFERROR(SORT(FILTER({${items}!${L(ih, 'Name')}2:${L(ih, 'Name')}, ${items}!${L(ih, 'Category')}2:${L(ih, 'Category')}, ` +
+    `SUMIF(${log}!${L(lh, 'Item ID')}2:${L(lh, 'Item ID')}, ${iId}, ${log}!${L(lh, 'Change')}2:${L(lh, 'Change')}), ` +
+    `${items}!${L(ih, 'Cost')}2:${L(ih, 'Cost')}, ${items}!${L(ih, 'Reorder at')}2:${L(ih, 'Reorder at')}}, ` +
+    `${iId}<>"", ${items}!${L(ih, 'Active')}2:${L(ih, 'Active')}<>FALSE), 2, TRUE, 1, TRUE), ""))`);
+  s.getRange('F2').setFormula('=ARRAYFORMULA(IF(A2:A="",,C2:C*D2:D))');
+  s.getRange('G2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(C2:C<=0,"Out",IF(C2:C<=E2:E,"Low","OK"))))');
+  s.getRange('D:D').setNumberFormat('$#,##0.00'); s.getRange('F:F').setNumberFormat('$#,##0.00');
+  s.setColumnWidth(1, 240); s.setColumnWidth(2, 200);
+  s.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Out').setBackground('#f6d6cf').setFontColor('#8e2a18').setRanges([s.getRange('G2:G')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Low').setBackground('#f6e7c4').setFontColor('#7a5410').setRanges([s.getRange('G2:G')]).build(),
+  ]);
+  s.protect().setDescription('Stock is calculated from Items and Log. Edit those instead.').setWarningOnly(true);
+
+  // Balances: pending charges by scout, for the treasurer.
+  let b = ss.getSheetByName('Balances') || ss.insertSheet('Balances');
+  b.clear(); b.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
+  const range = `${ch}!A2:${colLetter_(TABS.charges.headers.length)}`;
+  const q = (c) => `Col${chh[c] + 1}`;
+  b.getRange('A1').setFormula(
+    `=IFERROR(QUERY({${range}}, "select ${q('Scout')}, count(${q('Amount')}), sum(${q('Amount')}) where ${q('Status')} = 'Pending' group by ${q('Scout')} order by ${q('Scout')} ` +
+    `label ${q('Scout')} 'Scout', count(${q('Amount')}) 'Pending charges', sum(${q('Amount')}) 'Amount due'", 0), "No pending charges")`);
+  b.getRange('A1:C1').setFontWeight('bold').setBackground('#e3e6da');
+  b.getRange('C:C').setNumberFormat('$#,##0.00');
+  b.setColumnWidth(1, 240);
+  b.protect().setDescription('Balances is calculated from the Charges tab.').setWarningOnly(true);
+}
+
+function ensureBackupFolder_() {
+  const id = getSetting_('Backup folder ID');
+  if (id) { try { DriveApp.getFolderById(id); return; } catch (e) { /* recreate */ } }
+  const f = DriveApp.createFolder('Troop Closet backups');
+  setSetting_('Backup folder ID', f.getId());
+}
+
+function ensureTriggers_() {
+  const have = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());
+  if (have.indexOf('weeklyBackup') < 0) {
+    ScriptApp.newTrigger('weeklyBackup').timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(2).create();
+  }
+  if (have.indexOf('stampChargeEdit') < 0) {
+    ScriptApp.newTrigger('stampChargeEdit').forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create();
+  }
+}
+
+/** Weekly: copy the whole spreadsheet into the backup folder, keep the newest N. */
+function weeklyBackup() {
+  ensureBackupFolder_();
+  const folder = DriveApp.getFolderById(getSetting_('Backup folder ID'));
+  const ss = SpreadsheetApp.getActive();
+  const stamp = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  DriveApp.getFileById(ss.getId()).makeCopy(`${ss.getName()} backup ${stamp}`, folder);
+  const keep = Number(getSetting_('Backups to keep')) || 12;
+  const files = [];
+  const it = folder.getFiles();
+  while (it.hasNext()) files.push(it.next());
+  files.sort((a, b) => b.getDateCreated() - a.getDateCreated());
+  files.slice(keep).forEach(f => f.setTrashed(true));
+}
+
+/** When someone changes a charge's Status by hand in the sheet, record when and who. */
+function stampChargeEdit(e) {
+  try {
+    const sh = e.range.getSheet();
+    if (sh.getName() !== TABS.charges.name || e.range.getRow() < 2) return;
+    const h = headerMap_(sh);
+    if (e.range.getColumn() !== h['Status'] + 1 || e.range.getNumColumns() !== 1) return;
+    const who = (e.user && e.user.getEmail && e.user.getEmail()) || 'edited in sheet';
+    for (let r = e.range.getRow(); r < e.range.getRow() + e.range.getNumRows(); r++) {
+      sh.getRange(r, h['Status changed'] + 1).setValue(new Date());
+      sh.getRange(r, h['Status changed by'] + 1).setValue(who);
+    }
+  } catch (err) { console.error(err); }
+}
+
+/* =====================================================================
+ * Web API
+ * ===================================================================== */
+
+function doGet() {
+  return json_({ ok: true, service: 'troop-closet', note: 'POST JSON requests to this address.' });
+}
+
+function doPost(e) {
+  let req;
+  try { req = JSON.parse(e.postData && e.postData.contents || '{}'); }
+  catch (err) { return json_({ ok: false, code: 'bad_request', error: 'Request was not valid JSON.' }); }
+  try {
+    const action = String(req.action || '');
+    if (action === 'login') return json_({ ok: true, data: login_(req.idToken) });
+    const me = sessionUser_(req.token);
+    const fn = ACTIONS[action];
+    if (!fn) throw apiError_('bad_request', 'Unknown action.');
+    return json_({ ok: true, data: fn(me, req.args || {}) });
+  } catch (err) {
+    if (err && err.code) return json_({ ok: false, code: err.code, error: err.message });
+    console.error(err && err.stack || err);
+    return json_({ ok: false, code: 'server_error', error: 'Something went wrong on the server. Try again.' });
+  }
+}
+
+const ACTIONS = {
+  logout: (me, a, token) => { revokeSessions_(me.email, me.sessionKey); return true; },
+  getData: (me) => getData_(me),
+  give: (me, a) => withLock_(() => give_(me, a)),
+  restock: (me, a) => withLock_(() => restock_(me, a)),
+  count: (me, a) => withLock_(() => count_(me, a)),
+  undo: (me, a) => withLock_(() => undo_(me, a)),
+  addScout: (me, a) => withLock_(() => addScout_(me, a)),
+  updateScout: (me, a) => withLock_(() => updateScout_(me, a)),
+  addItem: (me, a) => { need_(me, ['Admin']); return withLock_(() => addItem_(me, a)); },
+  updateItem: (me, a) => withLock_(() => updateItem_(me, a)),
+  linkBarcode: (me, a) => withLock_(() => linkBarcode_(me, a)),
+  makeTroopBarcode: (me, a) => withLock_(() => makeTroopBarcode_(me, a)),
+  setChargeStatus: (me, a) => { need_(me, ['Admin', 'Treasurer']); return withLock_(() => setChargeStatus_(me, a)); },
+  saveLeader: (me, a) => { need_(me, ['Admin']); return withLock_(() => saveLeader_(me, a)); },
+  signOutEverywhere: (me, a) => { need_(me, ['Admin']); revokeSessions_(String(a.email || '').toLowerCase()); return true; },
+};
+
+/* ---------- auth ---------- */
+
+function login_(idToken) {
+  if (!idToken) throw apiError_('unauthorized', 'Sign in with Google to continue.');
+  const clientId = String(getSetting_('Google sign-in client ID') || '').trim();
+  if (!clientId) throw apiError_('not_configured', 'Google sign-in is not set up yet. Add the client ID on the Settings tab.');
+  const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw apiError_('unauthorized', 'Google sign-in could not be verified. Try again.');
+  const t = JSON.parse(res.getContentText());
+  const okIss = t.iss === 'accounts.google.com' || t.iss === 'https://accounts.google.com';
+  if (t.aud !== clientId || !okIss || String(t.email_verified) !== 'true' || Number(t.exp) * 1000 < Date.now()) {
+    throw apiError_('unauthorized', 'Google sign-in could not be verified. Try again.');
+  }
+  const email = String(t.email).toLowerCase();
+  const leader = findLeader_(email);
+  if (!leader) throw apiError_('not_a_leader', `${email} isn't on the leader list. Ask the closet admin to add you.`);
+
+  const token = Utilities.getUuid() + Utilities.getUuid();
+  const days = Math.max(1, Number(getSetting_('Session days')) || 30);
+  PropertiesService.getScriptProperties().setProperty('s_' + sha256_(token), JSON.stringify({ email, exp: Date.now() + days * 864e5 }));
+  pruneSessions_();
+  return { token, me: publicMe_(leader), expiresInDays: days };
+}
+
+function sessionUser_(token) {
+  if (!token) throw apiError_('unauthorized', 'Sign in to continue.');
+  const key = 's_' + sha256_(String(token));
+  const raw = PropertiesService.getScriptProperties().getProperty(key);
+  if (!raw) throw apiError_('unauthorized', 'Your sign-in has expired. Sign in again.');
+  const s = JSON.parse(raw);
+  if (s.exp < Date.now()) { PropertiesService.getScriptProperties().deleteProperty(key); throw apiError_('unauthorized', 'Your sign-in has expired. Sign in again.'); }
+  const leader = findLeader_(s.email);
+  if (!leader) { PropertiesService.getScriptProperties().deleteProperty(key); throw apiError_('unauthorized', 'Your access was removed. Ask the closet admin if this is a mistake.'); }
+  leader.sessionKey = key;
+  return leader;
+}
+
+function findLeader_(email) {
+  email = String(email || '').toLowerCase().trim();
+  const row = readTable_('leaders').find(r => String(r['Email']).toLowerCase().trim() === email);
+  if (!row || row['Active'] === false || String(row['Active']).toUpperCase() === 'FALSE') return null;
+  const role = ROLES.indexOf(row['Role']) >= 0 ? row['Role'] : 'Leader';
+  return { email, name: String(row['Name'] || email.split('@')[0]), role };
+}
+
+function publicMe_(l) { return { email: l.email, name: l.name, role: l.role }; }
+
+function revokeSessions_(email, onlyKey) {
+  const props = PropertiesService.getScriptProperties();
+  if (onlyKey) { props.deleteProperty(onlyKey); return; }
+  const all = props.getProperties();
+  Object.keys(all).forEach(k => {
+    if (k.indexOf('s_') !== 0) return;
+    try { if (JSON.parse(all[k]).email === email) props.deleteProperty(k); } catch (e) { props.deleteProperty(k); }
+  });
+}
+
+function pruneSessions_() {
+  const props = PropertiesService.getScriptProperties(), all = props.getProperties(), now = Date.now();
+  Object.keys(all).forEach(k => { if (k.indexOf('s_') === 0) { try { if (JSON.parse(all[k]).exp < now) props.deleteProperty(k); } catch (e) { props.deleteProperty(k); } } });
+}
+
+function need_(me, roles) {
+  if (roles.indexOf(me.role) < 0) throw apiError_('forbidden', `This needs the ${roles.join(' or ')} role.`);
+}
+
+/* ---------- reads ---------- */
+
+function getData_(me) {
+  const items = readTable_('items').filter(r => r['ID']).map(itemOut_);
+  const scouts = readTable_('scouts').filter(r => r['ID']).map(r => ({
+    id: String(r['ID']), name: String(r['Name']), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
+  }));
+  const log = readTable_('log').filter(r => r['ID']).map(r => ({
+    id: String(r['ID']), at: time_(r['When']), itemId: String(r['Item ID']), itemName: String(r['Item']),
+    delta: Number(r['Change']) || 0, kind: String(r['Type']), scoutId: String(r['Scout ID'] || ''), scoutName: String(r['Scout'] || ''),
+    note: String(r['Note'] || ''), by: String(r['Logged by'] || ''), unitCost: Number(r['Unit cost']) || 0,
+  }));
+  const charges = readTable_('charges').filter(r => r['ID']).map(chargeOut_);
+  const out = {
+    me: publicMe_(me),
+    settings: {
+      appTitle: String(getSetting_('App title') || 'Troop Closet'),
+      troopName: String(getSetting_('Troop name') || ''),
+      barcodePrefix: String(getSetting_('Barcode prefix') || 'TC-'),
+    },
+    items, scouts, log, charges,
+    sheetUrl: me.role === 'Admin' ? SpreadsheetApp.getActive().getUrl() : '',
+  };
+  if (me.role === 'Admin') {
+    out.leaders = readTable_('leaders').filter(r => r['Email']).map(r => ({
+      email: String(r['Email']).toLowerCase(), name: String(r['Name'] || ''), role: String(r['Role'] || 'Leader'), active: r['Active'] !== false,
+    }));
+  }
+  return out;
+}
+
+function itemOut_(r) {
+  return {
+    id: String(r['ID']), name: String(r['Name']), cat: String(r['Category'] || 'Other'),
+    cost: Number(r['Cost']) || 0, rule: CHARGE_RULES.indexOf(r['Charge rule']) >= 0 ? r['Charge rule'] : 'Free',
+    reorder: Number(r['Reorder at']) || 0, stockTo: Number(r['Stock to']) || 0,
+    barcodes: String(r['Barcodes'] || '').split(/[,\s]+/).filter(Boolean),
+    active: r['Active'] !== false,
+  };
+}
+
+function chargeOut_(r) {
+  return {
+    id: String(r['ID']), at: time_(r['When']), scoutId: String(r['Scout ID']), scoutName: String(r['Scout']),
+    itemId: String(r['Item ID']), itemName: String(r['Item']), qty: Number(r['Qty']) || 1,
+    amount: Number(r['Amount']) || 0, status: CHARGE_STATUSES.indexOf(r['Status']) >= 0 ? r['Status'] : 'Pending',
+    reason: String(r['Reason'] || ''), logId: String(r['Log ID'] || ''), by: String(r['Created by'] || ''),
+    changedAt: time_(r['Status changed']), changedBy: String(r['Status changed by'] || ''),
+  };
+}
+
+/* ---------- writes ---------- */
+
+/**
+ * Give items to a scout.
+ * args: { scoutId, lines: [{ itemId, qty, waiveReason? }] }
+ * Charges follow each item's charge rule. "First one free" checks the scout's history.
+ */
+function give_(me, a) {
+  const scout = scoutById_(a.scoutId);
+  if (!scout || scout['Active'] === false) throw apiError_('bad_request', 'That scout is not on the active list.');
+  const lines = cleanLines_(a.lines);
+  const items = itemsById_();
+  const log = readTable_('log');
+  const now = new Date();
+  const logRows = [], chargeRows = [];
+  lines.forEach(l => {
+    const it = items[l.itemId];
+    if (!it) throw apiError_('bad_request', 'One of those items was removed. Refresh and try again.');
+    const cost = Number(it['Cost']) || 0, rule = it['Charge rule'];
+    const logId = id_();
+    logRows.push({ 'ID': logId, 'When': now, 'Item ID': l.itemId, 'Item': it['Name'], 'Change': -l.qty, 'Type': 'out',
+      'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Note': '', 'Logged by': me.email, 'Unit cost': cost });
+    let charged = 0;
+    if (rule === 'Always charge') charged = l.qty;
+    else if (rule === 'First one free') {
+      const prior = log.filter(r => String(r['Scout ID']) === String(scout['ID']) && String(r['Item ID']) === l.itemId && r['Type'] === 'out')
+        .reduce((s, r) => s - (Number(r['Change']) || 0), 0);
+      charged = prior > 0 ? l.qty : l.qty - 1;
+    }
+    if (charged > 0 && cost > 0) {
+      const waived = String(l.waiveReason || '').trim();
+      chargeRows.push({ 'ID': id_(), 'When': now, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': l.itemId, 'Item': it['Name'],
+        'Qty': charged, 'Amount': round2_(charged * cost), 'Status': waived ? 'Waived' : 'Pending', 'Reason': waived.slice(0, 200),
+        'Log ID': logId, 'Created by': me.email, 'Status changed': waived ? now : '', 'Status changed by': waived ? me.email : '' });
+    }
+  });
+  appendRows_('log', logRows);
+  if (chargeRows.length) appendRows_('charges', chargeRows);
+  return { logIds: logRows.map(r => r['ID']), chargeIds: chargeRows.map(r => r['ID']), charged: round2_(chargeRows.filter(r => r['Status'] === 'Pending').reduce((s, r) => s + r['Amount'], 0)) };
+}
+
+function restock_(me, a) {
+  const lines = cleanLines_(a.lines), items = itemsById_(), now = new Date(), note = String(a.note || '').slice(0, 200);
+  const rows = lines.map(l => {
+    const it = items[l.itemId];
+    if (!it) throw apiError_('bad_request', 'One of those items was removed. Refresh and try again.');
+    return { 'ID': id_(), 'When': now, 'Item ID': l.itemId, 'Item': it['Name'], 'Change': l.qty, 'Type': 'in',
+      'Scout ID': '', 'Scout': '', 'Note': note, 'Logged by': me.email, 'Unit cost': Number(it['Cost']) || 0 };
+  });
+  appendRows_('log', rows);
+  return { logIds: rows.map(r => r['ID']) };
+}
+
+/** Shelf count: logs the difference between what's counted and what the app thinks is there. */
+function count_(me, a) {
+  const it = itemsById_()[String(a.itemId)];
+  if (!it) throw apiError_('bad_request', 'That item no longer exists.');
+  const target = Math.trunc(Number(a.target));
+  if (!(target >= 0)) throw apiError_('bad_request', 'Enter the number on the shelf.');
+  const onHand = readTable_('log').filter(r => String(r['Item ID']) === String(a.itemId)).reduce((s, r) => s + (Number(r['Change']) || 0), 0);
+  const d = target - onHand;
+  if (!d) return { logIds: [] };
+  const row = { 'ID': id_(), 'When': new Date(), 'Item ID': String(a.itemId), 'Item': it['Name'], 'Change': d, 'Type': 'count',
+    'Scout ID': '', 'Scout': '', 'Note': String(a.note || 'Shelf count').slice(0, 200), 'Logged by': me.email, 'Unit cost': Number(it['Cost']) || 0 };
+  appendRows_('log', [row]);
+  return { logIds: [row['ID']] };
+}
+
+/** Remove log entries (and their charges). Leaders: their own entries from the last 24 hours. Admin: any. */
+function undo_(me, a) {
+  const ids = new Set((a.logIds || []).map(String));
+  if (!ids.size) return true;
+  const log = readTable_('log').filter(r => ids.has(String(r['ID'])));
+  log.forEach(r => {
+    const own = String(r['Logged by']).toLowerCase() === me.email && Date.now() - time_(r['When']) < 864e5;
+    if (me.role !== 'Admin' && !own) throw apiError_('forbidden', 'Only the closet admin can remove that entry. You can remove your own entries for 24 hours.');
+  });
+  const charges = readTable_('charges').filter(c => ids.has(String(c['Log ID'])));
+  if (charges.some(c => c['Status'] === 'Posted')) throw apiError_('conflict', 'The treasurer already posted a charge for this entry. Ask them to reverse it first.');
+  deleteRows_('charges', charges.map(c => c._row));
+  deleteRows_('log', log.map(r => r._row));
+  return true;
+}
+
+function addScout_(me, a) {
+  const name = String(a.name || '').trim();
+  if (!name) throw apiError_('bad_request', "Enter the scout's name.");
+  const row = { 'ID': id_(), 'Name': name.slice(0, 80), 'Patrol': String(a.patrol || '').trim().slice(0, 60), 'Active': true };
+  appendRows_('scouts', [row]);
+  return { id: row['ID'] };
+}
+
+function updateScout_(me, a) {
+  const s = scoutById_(a.id);
+  if (!s) throw apiError_('bad_request', 'That scout no longer exists.');
+  const patch = {};
+  if ('name' in a) { const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', "Enter the scout's name."); patch['Name'] = n.slice(0, 80); }
+  if ('patrol' in a) patch['Patrol'] = String(a.patrol).trim().slice(0, 60);
+  if ('active' in a) { need_(me, ['Admin']); patch['Active'] = !!a.active; }
+  updateRow_('scouts', s._row, patch);
+  return true;
+}
+
+function addItem_(me, a) {
+  const name = String(a.name || '').trim();
+  if (!name) throw apiError_('bad_request', 'Give the item a name.');
+  if (readTable_('items').some(r => r['Active'] !== false && String(r['Name']).toLowerCase() === name.toLowerCase())) {
+    throw apiError_('conflict', `${name} is already in the closet.`);
+  }
+  const row = Object.assign({ 'ID': id_(), 'Name': name.slice(0, 100), 'Active': true, 'Barcodes': '' }, itemPatch_(a, true));
+  appendRows_('items', [row]);
+  const start = Math.trunc(Number(a.startQty) || 0);
+  if (start > 0) appendRows_('log', [{ 'ID': id_(), 'When': new Date(), 'Item ID': row['ID'], 'Item': row['Name'], 'Change': start, 'Type': 'count',
+    'Scout ID': '', 'Scout': '', 'Note': 'Starting count', 'Logged by': me.email, 'Unit cost': row['Cost'] || 0 }]);
+  return { id: row['ID'] };
+}
+
+function updateItem_(me, a) {
+  const it = itemsById_()[String(a.id)];
+  if (!it) throw apiError_('bad_request', 'That item no longer exists.');
+  const leaderFields = ['reorder', 'stockTo'];
+  const touched = Object.keys(a).filter(k => k !== 'id');
+  if (touched.some(k => leaderFields.indexOf(k) < 0)) need_(me, ['Admin']);
+  const patch = itemPatch_(a, false);
+  if ('name' in a) { const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', 'Give the item a name.'); patch['Name'] = n.slice(0, 100); }
+  if ('active' in a) patch['Active'] = !!a.active;
+  updateRow_('items', it._row, patch);
+  return true;
+}
+
+function itemPatch_(a, withDefaults) {
+  const p = {};
+  if ('cat' in a || withDefaults) p['Category'] = CATEGORIES.indexOf(a.cat) >= 0 ? a.cat : 'Other';
+  if ('cost' in a || withDefaults) p['Cost'] = Math.max(0, round2_(Number(a.cost) || 0));
+  if ('rule' in a || withDefaults) p['Charge rule'] = CHARGE_RULES.indexOf(a.rule) >= 0 ? a.rule : 'Free';
+  if ('reorder' in a || withDefaults) p['Reorder at'] = Math.max(0, Math.trunc(Number(a.reorder) || 0));
+  if ('stockTo' in a || withDefaults) p['Stock to'] = Math.max(0, Math.trunc(Number(a.stockTo) || 0));
+  return p;
+}
+
+/** Attach a scanned barcode (e.g. a council UPC) to an item. Any leader can do this. */
+function linkBarcode_(me, a) {
+  const code = cleanCode_(a.code);
+  if (!code) throw apiError_('bad_request', 'That barcode could not be read.');
+  const all = readTable_('items');
+  const owner = all.find(r => splitCodes_(r['Barcodes']).indexOf(code) >= 0);
+  if (owner && String(owner['ID']) !== String(a.itemId)) throw apiError_('conflict', `That barcode is already linked to ${owner['Name']}.`);
+  const it = all.find(r => String(r['ID']) === String(a.itemId));
+  if (!it) throw apiError_('bad_request', 'That item no longer exists.');
+  const codes = splitCodes_(it['Barcodes']);
+  if (codes.indexOf(code) < 0) codes.push(code);
+  updateRow_('items', it._row, { 'Barcodes': codes.join(', ') });
+  return { code };
+}
+
+/** Assign the next troop barcode (prefix + 4 digits) to an item. */
+function makeTroopBarcode_(me, a) {
+  const it = itemsById_()[String(a.itemId)];
+  if (!it) throw apiError_('bad_request', 'That item no longer exists.');
+  const prefix = String(getSetting_('Barcode prefix') || 'TC-').toUpperCase();
+  const existing = splitCodes_(it['Barcodes']).find(c => c.indexOf(prefix) === 0);
+  if (existing) return { code: existing };
+  let n = Math.max(1, Math.trunc(Number(getSetting_('Next barcode number')) || 1));
+  const taken = new Set(readTable_('items').flatMap(r => splitCodes_(r['Barcodes'])));
+  let code;
+  do { code = prefix + String(n).padStart(4, '0'); n++; } while (taken.has(code));
+  setSetting_('Next barcode number', n);
+  const codes = splitCodes_(it['Barcodes']); codes.push(code);
+  updateRow_('items', it._row, { 'Barcodes': codes.join(', ') });
+  return { code };
+}
+
+function setChargeStatus_(me, a) {
+  const status = String(a.status);
+  if (CHARGE_STATUSES.indexOf(status) < 0) throw apiError_('bad_request', 'Unknown charge status.');
+  const ids = new Set((a.ids || []).map(String));
+  const rows = readTable_('charges').filter(c => ids.has(String(c['ID'])));
+  const now = new Date();
+  rows.forEach(c => {
+    const patch = { 'Status': status, 'Status changed': now, 'Status changed by': me.email };
+    if (status === 'Waived') patch['Reason'] = String(a.reason || c['Reason'] || '').slice(0, 200);
+    updateRow_('charges', c._row, patch);
+  });
+  return { updated: rows.length };
+}
+
+function saveLeader_(me, a) {
+  const email = String(a.email || '').toLowerCase().trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw apiError_('bad_request', 'Enter a valid email address.');
+  const role = ROLES.indexOf(a.role) >= 0 ? a.role : 'Leader';
+  const active = a.active !== false;
+  const rows = readTable_('leaders');
+  const row = rows.find(r => String(r['Email']).toLowerCase().trim() === email);
+  if (email === me.email && (role !== 'Admin' || !active)) {
+    const otherAdmins = rows.filter(r => r['Role'] === 'Admin' && r['Active'] !== false && String(r['Email']).toLowerCase() !== email);
+    if (!otherAdmins.length) throw apiError_('conflict', "You're the only admin. Make someone else an admin first.");
+  }
+  const vals = { 'Email': email, 'Name': String(a.name || '').trim().slice(0, 80), 'Role': role, 'Active': active };
+  if (row) updateRow_('leaders', row._row, vals); else appendRows_('leaders', [vals]);
+  if (!active || (row && row['Role'] !== role)) revokeSessions_(email);
+  return true;
+}
+
+/* =====================================================================
+ * Helpers
+ * ===================================================================== */
+
+function sheet_(k) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(TABS[k].name);
+  if (!sh) throw apiError_('not_configured', `The ${TABS[k].name} tab is missing. Run setup again.`);
+  return sh;
+}
+
+function headerMap_(sh) {
+  const hs = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0];
+  const m = {}; hs.forEach((h, i) => { if (h !== '') m[String(h).trim()] = i; });
+  return m;
+}
+
+function col_(sh, h, name) {
+  if (h[name] == null) throw new Error(`Column "${name}" is missing on ${sh.getName()}.`);
+  return sh.getRange(2, h[name] + 1, sh.getMaxRows() - 1, 1);
+}
+
+/** Read a tab into objects keyed by header. Each object has `_row` (sheet row number). */
+function readTable_(k) {
+  const sh = sheet_(k), h = headerMap_(sh), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  const vals = sh.getRange(2, 1, n, sh.getLastColumn()).getValues();
+  return vals.map((v, i) => { const o = { _row: i + 2 }; Object.keys(h).forEach(name => { o[name] = v[h[name]]; }); return o; });
+}
+
+function appendRows_(k, objs) {
+  if (!objs.length) return;
+  const sh = sheet_(k), h = headerMap_(sh), width = sh.getLastColumn();
+  const rows = objs.map(o => { const r = new Array(width).fill(''); Object.keys(o).forEach(name => { if (h[name] != null) r[h[name]] = o[name]; }); return r; });
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, width).setValues(rows);
+}
+
+function updateRow_(k, row, patch) {
+  const sh = sheet_(k), h = headerMap_(sh);
+  Object.keys(patch).forEach(name => { if (h[name] != null) sh.getRange(row, h[name] + 1).setValue(patch[name]); });
+}
+
+function deleteRows_(k, rowNums) {
+  const sh = sheet_(k);
+  rowNums.slice().sort((x, y) => y - x).forEach(r => sh.deleteRow(r));
+}
+
+function itemsById_() { const m = {}; readTable_('items').forEach(r => { if (r['ID']) m[String(r['ID'])] = r; }); return m; }
+function scoutById_(id) { return readTable_('scouts').find(r => String(r['ID']) === String(id)); }
+
+function cleanLines_(lines) {
+  const merged = {};
+  (lines || []).forEach(l => {
+    const q = Math.trunc(Number(l && l.qty));
+    if (!l || !l.itemId || !(q > 0) || q > 500) return;
+    const k = String(l.itemId);
+    merged[k] = merged[k] || { itemId: k, qty: 0, waiveReason: '' };
+    merged[k].qty += q;
+    if (l.waiveReason) merged[k].waiveReason = String(l.waiveReason);
+  });
+  const out = Object.keys(merged).map(k => merged[k]);
+  if (!out.length) throw apiError_('bad_request', 'Add at least one item.');
+  return out;
+}
+
+function getSetting_(name) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(TABS.settings.name);
+  if (!sh || sh.getLastRow() < 2) return '';
+  const v = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().find(r => String(r[0]).trim() === name);
+  return v ? v[1] : '';
+}
+
+function setSetting_(name, value) {
+  const sh = sheet_('settings');
+  const vals = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues() : [];
+  const i = vals.findIndex(r => String(r[0]).trim() === name);
+  if (i >= 0) sh.getRange(i + 2, 2).setValue(value); else sh.appendRow([name, value, '']);
+}
+
+function withLock_(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw apiError_('busy', 'The closet is busy. Try again in a moment.');
+  try { return fn(); } finally { SpreadsheetApp.flush(); lock.releaseLock(); }
+}
+
+function cleanCode_(c) { return String(c || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 64); }
+function splitCodes_(s) { return String(s || '').split(/[,\s]+/).map(cleanCode_).filter(Boolean); }
+function id_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 12); }
+function round2_(n) { return Math.round(n * 100) / 100; }
+function time_(v) { return v instanceof Date ? v.getTime() : (v ? new Date(v).getTime() || 0 : 0); }
+function colLetter_(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function sha256_(s) { return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s).map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join(''); }
+function apiError_(code, message) { const e = new Error(message); e.code = code; return e; }
+function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }

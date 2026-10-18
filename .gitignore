@@ -1,0 +1,8 @@
+# clasp: your Google login lives in ~/.clasprc.json; never commit a copy.
+.clasprc.json
+# Per-person clasp link to the Apps Script project (copy from .clasp.json.example).
+.clasp.json
+
+node_modules/
+_site/
+.DS_Store
