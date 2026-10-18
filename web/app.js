@@ -1146,7 +1146,6 @@ function retEnvelopes() {
   const list = R.day === 'all' ? recent : recent.filter(l => dayKey(l.at) === R.day);
   wrap.append(el('div', { class: 'chips' }, [...days.slice(0, 8).map(([k, t]) => [k, fmtShort(t)]), ['all', 'All']].map(([k, l]) =>
     el('button', { type: 'button', class: 'chip', 'aria-pressed': String(R.day === k), onclick: () => { R.day = k; R.sel = {}; render(); } }, l))));
-  wrap.append(el('div', { class: 'rowbtns' }, el('button', { class: 'btn', type: 'button', onclick: () => printNode(envelopeList(list)) }, 'Print envelope list')));
   const sel = R.sel, ids = list.filter(l => sel[l.id]).map(l => l.id);
   const done = () => { R.sel = {}; render(); };
   const sec = el('div', { class: 'stack', style: 'gap:12px' }); wrap.append(sec);
@@ -1165,17 +1164,6 @@ function retEnvelopes() {
     el('span', { class: 'mini ' + (ids.length ? '' : 'muted'), style: 'flex:1 1 100%;font-weight:600', text: ids.length ? `${ids.length} selected` : 'Tick items that were never picked up' }),
     el('button', { class: 'btn small primary', type: 'button', disabled: !ids.length, onclick: () => save('checkIn', { logIds: ids }, `${ids.length} checked back in to stock`, done) }, ids.length ? `Check ${ids.length} back in` : 'Check back in')));
   return wrap;
-}
-
-function envelopeList(list) {
-  const root = el('div', {}, el('h2', { text: 'Envelopes' }), el('p', { text: [S.settings.troopName, `${list.length} items`, 'Printed ' + new Date().toLocaleDateString()].filter(Boolean).join(' · ') }));
-  for (const [patrol, pl] of groupBy(list, patrolOf)) {
-    root.append(el('h3', { style: 'color:#000;margin:14px 0 4px;border-bottom:1px solid #999', text: patrol || 'No patrol' }));
-    for (const [name, items] of groupBy(pl, scoutNameOf)) root.append(el('div', { style: 'break-inside:avoid;margin:6px 0 10px' },
-      el('div', { style: 'font-weight:700', text: `☐ ${name} (${items.length})` }),
-      el('div', { style: 'margin-left:18px', text: items.map(itemNameOf).sort().join(', ') })));
-  }
-  return root;
 }
 
 /* ---------- boot ---------- */
