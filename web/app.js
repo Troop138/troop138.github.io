@@ -368,8 +368,11 @@ function viewGive() {
   if (loading()) { setAction(null); return; }
   const v = $('#view'); v.replaceChildren(); const g = S.give;
   if (g.scoutId && !S.scouts.has(g.scoutId)) { g.scoutId = null; renderToolbar(); }
+  if (g.importing && isRole('Admin')) { setAction(null); summaryHook = null; viewImport(v); return; }
   if (!g.scoutId) {
     setAction(null); summaryHook = null;
+    if (isRole('Admin')) v.append(el('button', { type: 'button', class: 'row tap card', style: 'margin-top:12px;padding:10px 14px', onclick: () => { g.importing = true; render(); window.scrollTo(0, 0); } },
+      el('div', { class: 'main' }, el('div', { class: 'name', text: 'Import earned badges from Scoutbook' }), el('div', { class: 'sub', text: 'Court of honor: give out everything in the recognition report at once' })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
     v.append(el('p', { class: 'muted mini', style: 'margin:12px 2px 0', text: 'Step 1 of 2 · Pick the scout receiving items' }));
     const q = S.scoutQ.trim().toLowerCase();
     const sc = activeScouts().filter(s => !q || s.name.toLowerCase().includes(q) || s.patrol.toLowerCase().includes(q));
@@ -769,6 +772,7 @@ const REPORTS = [
   ['scout', 'Scout history', 'Everything one scout has received', null],
   ['charges', 'Charges', 'Pending, posted and waived charges', ['Admin', 'Treasurer']],
   ['shrink', 'Shelf count fixes', 'Corrections from shelf counts', ['Admin']],
+  ['envelopes', 'Envelopes & still owed', 'Check back in badges nobody picked up', ['Admin']],
 ];
 function viewReports() {
   setAction(null); if (loading()) return;
@@ -780,6 +784,7 @@ function viewReports() {
     v.append(el('div', { class: 'menu' }, avail.map(([k, t, d]) => el('button', { type: 'button', class: 'row tap', onclick: () => { S.report = k; S.rep.sel = {}; render(); window.scrollTo(0, 0); } },
       el('div', { class: 'main' }, el('div', { class: 'name', text: t }), el('div', { class: 'sub', text: d })),
       k === 'charges' && pending.length ? el('span', { class: 'pill pending', text: `${pending.length} pending` }) : null,
+      k === 'envelopes' && S.awards.some(a => a.status === 'Owed') ? el('span', { class: 'pill', text: `${S.awards.filter(a => a.status === 'Owed').length} owed` }) : null,
       el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })))));
     return;
   }
@@ -787,7 +792,7 @@ function viewReports() {
   const head = el('div', { style: 'display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap' },
     el('div', { style: 'display:flex;gap:10px;align-items:center' }, el('button', { class: 'btn small', type: 'button', onclick: () => { S.report = ''; render(); } }, '‹ Reports'), el('h2', { text: meta[1] })));
   v.append(head);
-  const r = ({ inventory: repInventory, reorder: repReorder, activity: repActivity, scout: repScout, charges: repCharges, shrink: repShrink })[S.report]();
+  const r = ({ inventory: repInventory, reorder: repReorder, activity: repActivity, scout: repScout, charges: repCharges, shrink: repShrink, envelopes: repEnvelopes })[S.report]();
   if (r.controls) v.append(r.controls);
   if (r.kpis) v.append(el('div', { class: 'kpis' }, r.kpis.map(([k, val]) => el('div', { class: 'kpi' }, el('div', { class: 'k', text: k }), el('div', { class: 'v', text: val })))));
   if (r.extra) v.append(r.extra);
@@ -959,7 +964,7 @@ function viewMore() {
   const sub = S.sub;
   if (sub) {
     v.append(el('div', { style: 'margin-top:12px' }, el('button', { class: 'btn small', type: 'button', onclick: () => { S.sub = ''; render(); } }, '‹ More')));
-    ({ scouts: viewScouts, history: viewHistory, labels: viewLabels, admin: viewAdmin, share: viewShare, coh: viewCoh })[sub](v);
+    ({ scouts: viewScouts, history: viewHistory, labels: viewLabels, admin: viewAdmin, share: viewShare })[sub](v);
     return;
   }
   const items = [
@@ -967,7 +972,7 @@ function viewMore() {
     ['history', 'History', 'Recent entries, and undo your own'],
     ['labels', 'Print labels', 'Barcode stickers for bins and bags'],
     ['share', 'Share the app', 'QR code and link for other leaders'],
-    ...(isRole('Admin') ? [['coh', 'Court of honor', 'Log earned badges from Scoutbook, check envelopes back in' + (S.awards.some(a => a.status === 'Owed') ? ` · ${S.awards.filter(a => a.status === 'Owed').length} still owed` : '')], ['admin', 'Leaders & access', 'Who can sign in, and their roles']] : []),
+    ...(isRole('Admin') ? [['admin', 'Leaders & access', 'Who can sign in, and their roles']] : []),
   ];
   v.append(el('div', { class: 'menu' }, items.map(([k, t, d]) => el('button', { type: 'button', class: 'row tap', onclick: () => { S.sub = k; render(); window.scrollTo(0, 0); } },
     el('div', { class: 'main' }, el('div', { class: 'name', text: t }), el('div', { class: 'sub', text: d })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })))));
@@ -1208,17 +1213,32 @@ function cohPreview() {
   return { add, badScouts: [...badScouts], badItems: [...badItems.values()].sort((a, b) => b.n - a.n), sinceStr };
 }
 
-function viewCoh(v) {
+function viewImport(v) {
   const C = S.coh;
-  v.append(el('h2', { style: 'margin-top:12px', text: 'Court of honor' }));
+  v.append(el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:12px' },
+    el('button', { class: 'btn small', type: 'button', onclick: () => { S.give.importing = false; C.rows = null; C.done = null; render(); } }, '‹ Give out'), el('h2', { text: 'Import from Scoutbook' })));
   const file = el('input', { type: 'file', id: 'cohfile', accept: '.csv,text/csv', hidden: true });
-  file.onchange = () => { const f = file.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { C.rows = readReport(String(rd.result)); C.file = f.name; C.skip = {}; render(); }; rd.readAsText(f); file.value = ''; };
+  file.onchange = () => { const f = file.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { C.rows = readReport(String(rd.result)); C.file = f.name; C.skip = {}; C.done = null; render(); }; rd.readAsText(f); file.value = ''; };
+  if (C.done) {
+    const list = S.awards.filter(a => a.status === 'Handed out' && dayKey(a.addedAt) === C.done.day);
+    v.append(el('div', { class: 'card stack', style: 'margin-top:12px' }, el('h3', { text: 'Done' }),
+      el('p', { style: 'margin:0', text: C.done.msg + '. Those items are out of stock and attributed to each scout.' }),
+      el('div', { class: 'rowbtns' }, el('button', { class: 'btn primary', type: 'button', disabled: !list.length, onclick: () => printNode(cohPullList(list)) }, 'Print envelope list'),
+        el('button', { class: 'btn', type: 'button', onclick: () => { S.give.importing = false; C.done = null; render(); } }, 'Done')),
+      el('p', { class: 'mini muted', style: 'margin:0', text: 'Anything nobody picks up: Reports → Envelopes & still owed, or the Check back in button on the scout.' })));
+    return;
+  }
   if (!C.rows) {
     v.append(el('div', { class: 'card stack', style: 'margin-top:12px' },
-      el('p', { style: 'margin:0', text: "Upload the Troop Recognition Report from Scoutbook (CSV). Every badge and rank a scout has earned is logged as handed out: it leaves stock and goes in their envelope. If they never pick it up, check it back in below. Upload the report again any time; badges already logged are skipped." }),
+      el('p', { style: 'margin:0', text: "Upload the Troop Recognition Report from Scoutbook (CSV). Every badge and rank a scout has earned is given out to them: it leaves stock and goes in their envelope. Upload it again any time; badges already logged are skipped." }),
       file, el('button', { class: 'btn primary', type: 'button', onclick: () => file.click() }, 'Upload recognition report')));
   } else v.append(cohImport(file));
-  v.append(cohEnvelopes(), cohOwed());
+}
+
+/** Reports → Envelopes & still owed. */
+function repEnvelopes() {
+  const extra = el('div', {}, cohEnvelopes(), cohOwed());
+  return { extra };
 }
 
 function cohImport(file) {
@@ -1269,7 +1289,7 @@ function cohImport(file) {
     const rows = P.add.map(d => ({ scoutId: d.scoutId, itemId: d.itemId, label: d.label, earned: d.earned, skip: !!C.skip[d.key] }));
     try { const r = await write('importAwards', { rows, since: P.sinceStr });
       toast([r.handedOut && `${r.handedOut} logged as handed out`, r.skipped && `${r.skipped} skipped`].filter(Boolean).join(' · ') || 'Nothing new');
-      C.rows = null; C.skip = {}; C.batch = ''; render(); } catch (e) { fail(e); }
+      C.rows = null; C.skip = {}; C.batch = ''; C.done = { day: new Date().toDateString(), msg: [r.handedOut && `${r.handedOut} badges given out`, r.skipped && `${r.skipped} skipped`].filter(Boolean).join(', ') || 'Nothing new' }; render(); } catch (e) { fail(e); }
   } }, nothing ? 'Nothing new to log' : logN === P.add.length ? `Log ${logN} as handed out` : `Log ${logN}, skip ${P.add.length - logN}`));
   return box;
 }
@@ -1280,8 +1300,8 @@ const dayKey = t => new Date(t).toDateString();
 function cohEnvelopes() {
   const C = S.coh, wrap = el('div', { class: 'stack', style: 'margin-top:16px' });
   const recent = S.awards.filter(a => a.status === 'Handed out' && a.logId && !S.returned.has(a.logId)).sort((a, b) => b.addedAt - a.addedAt);
-  wrap.append(el('h3', { text: 'Envelopes' }), el('p', { class: 'mini muted', style: 'margin:0', text: "Badges logged from the report in the last 120 days. When you clean out envelopes that weren't picked up, tick them and check them back in. Pick \"still owed\" to keep a note in case the scout comes looking." }));
-  if (!recent.length) { wrap.append(el('div', { class: 'empty', text: 'Nothing here yet. Upload the recognition report to log earned badges.' })); return wrap; }
+  wrap.append(el('h3', { text: 'Envelopes' }), el('p', { class: 'mini muted', style: 'margin:0', text: "Badges imported from Scoutbook in the last 120 days. When you clean out envelopes that weren't picked up, tick them and check them back in. Pick \"still owed\" to keep a note in case the scout comes looking." }));
+  if (!recent.length) { wrap.append(el('div', { class: 'empty', text: 'Nothing here yet. Import earned badges from the Give out screen.' })); return wrap; }
   const batches = [...new Map(recent.map(a => [dayKey(a.addedAt), a.addedAt])).entries()];
   if (!batches.some(([k]) => k === C.batch) && C.batch !== 'all') C.batch = batches[0][0];
   const list = C.batch === 'all' ? recent : recent.filter(a => dayKey(a.addedAt) === C.batch);
