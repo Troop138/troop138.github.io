@@ -26,6 +26,13 @@ items.appendRow(['i1', 'Tenderfoot', 'Rank', 1.5, 'Free', 3, 6, '', true]);
 items.appendRow(['i2', "Totin' Chip card", 'Award & card', 1, 'First one free', 5, 10, '012345678905', true]);
 items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge', 2, 4, '', true]);
 
+// Checkbox columns hold FALSE on empty rows in a real sheet. Reproduce that so
+// appends land right under the data, not below the checkboxes.
+[['Leaders', 3], ['Items', 8], ['Scouts', 3]].forEach(([tab, col]) => {
+  const s = env.ss.getSheetByName(tab);
+  for (let r = s.data.length + 1; r <= 40; r++) s.set(r, col + 1, false);
+});
+
 function call(action, body) {
   const res = ctx.doPost({ postData: { contents: JSON.stringify(Object.assign({ action }, body)) } });
   return JSON.parse(res.body);
@@ -141,6 +148,16 @@ test('a barcode cannot be linked to two items', () => {
   ok(api(lee, 'linkBarcode', { itemId: 'i1', code: ' 99887766 ' }));
   const it = ok(api(lee, 'getData')).items.find(i => i.id === 'i1');
   assert.deepStrictEqual(it.barcodes, ['TC-0001', '99887766']);
+});
+
+test('new rows go right under the data, not under empty checkbox rows', () => {
+  const scouts = env.ss.getSheetByName('Scouts').data;
+  const firstBlank = scouts.findIndex((r, i) => i > 0 && !r[0]);
+  assert.ok(firstBlank > 1);
+  assert.ok(scouts.slice(firstBlank).every(r => !r[0]), 'a scout was written below the checkbox rows');
+  ok(api(admin, 'saveLeader', { email: 'new@example.com', name: 'New', role: 'Leader' }));
+  const lead = env.ss.getSheetByName('Leaders').data;
+  assert.strictEqual(lead[4][0], 'new@example.com');
 });
 
 // --- leaders

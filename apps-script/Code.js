@@ -72,21 +72,21 @@ function setup() {
 
   // Settings defaults.
   const st = sheet_('settings');
-  const have = new Set(st.getRange(2, 1, Math.max(1, st.getLastRow() - 1), 1).getValues().flat().map(String));
+  const have = new Set(st.getRange(2, 1, Math.max(1, lastDataRow_(st) - 1), 1).getValues().flat().map(String));
   const missing = SETTINGS_DEFAULTS.filter(r => !have.has(r[0]));
-  if (missing.length) st.getRange(st.getLastRow() + 1, 1, missing.length, 3).setValues(missing);
+  if (missing.length) st.getRange(lastDataRow_(st) + 1, 1, missing.length, 3).setValues(missing);
   st.setColumnWidth(1, 200); st.setColumnWidth(2, 360); st.setColumnWidth(3, 360);
 
   // First admin: the account running setup (the troop account).
   const leaders = sheet_('leaders');
-  if (leaders.getLastRow() < 2) {
+  if (lastDataRow_(leaders) < 2) {
     const me = Session.getEffectiveUser().getEmail();
-    if (me) leaders.appendRow([me.toLowerCase(), 'Troop account', 'Admin', true]);
+    if (me) appendRows_('leaders', [{ 'Email': me.toLowerCase(), 'Name': 'Troop account', 'Role': 'Admin', 'Active': true }]);
   }
 
   // Starter item list at zero on hand.
   const items = sheet_('items');
-  if (items.getLastRow() < 2) {
+  if (lastDataRow_(items) < 2) {
     const rows = STARTER_ITEMS.map(([n, c, rule, re]) => [id_(), n, c, 0, rule, re, re * 2, '', true]);
     items.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
@@ -120,23 +120,19 @@ function ensureTab_(ss, def) {
 
 function applyFormatting_(ss) {
   const listRule = (vals) => SpreadsheetApp.newDataValidation().requireValueInList(vals, true).setAllowInvalid(false).build();
-  const check = SpreadsheetApp.newDataValidation().requireCheckbox().build();
 
   const it = sheet_('items'), ih = headerMap_(it);
   col_(it, ih, 'Category').setDataValidation(listRule(CATEGORIES));
   col_(it, ih, 'Charge rule').setDataValidation(listRule(CHARGE_RULES));
-  col_(it, ih, 'Active').setDataValidation(check);
   col_(it, ih, 'Cost').setNumberFormat('$#,##0.00');
 
   const sc = sheet_('scouts'), sh = headerMap_(sc);
-  col_(sc, sh, 'Active').setDataValidation(check);
-  // Existing rows written before validation: make blanks TRUE.
   fillBlankActive_(sc, sh);
   fillBlankActive_(it, ih);
 
   const le = sheet_('leaders'), lh = headerMap_(le);
   col_(le, lh, 'Role').setDataValidation(listRule(ROLES));
-  col_(le, lh, 'Active').setDataValidation(check);
+  fillBlankActive_(le, lh);
 
   const ch = sheet_('charges'), chh = headerMap_(ch);
   col_(ch, chh, 'Status').setDataValidation(listRule(CHARGE_STATUSES));
@@ -154,13 +150,20 @@ function applyFormatting_(ss) {
   protect_(col_(ch, chh, 'Amount'), 'Amounts are calculated when the item is given out.');
 }
 
+/**
+ * Active checkboxes only on rows that hold data (new rows get one when the app
+ * adds them). A checkbox on an empty row holds FALSE and makes the row look used.
+ * A blank Active on a real row means active.
+ */
 function fillBlankActive_(sh, h) {
-  const n = sh.getLastRow() - 1; if (n < 1) return;
-  const r = sh.getRange(2, h['Active'] + 1, n, 1), v = r.getValues();
-  const idCol = sh.getRange(2, (h['ID'] != null ? h['ID'] : h['Email']) + 1, n, 1).getValues();
+  const col = h['Active'] + 1, last = lastDataRow_(sh), max = sh.getMaxRows();
+  if (max > last) { const below = sh.getRange(last + 1, col, max - last, 1); below.clearDataValidations(); below.clearContent(); }
+  if (last < 2) return;
+  const r = sh.getRange(2, col, last - 1, 1), v = r.getValues();
   let changed = false;
-  v.forEach((row, i) => { if (idCol[i][0] !== '' && row[0] === '') { row[0] = true; changed = true; } });
+  v.forEach(row => { if (row[0] === '') { row[0] = true; changed = true; } });
   if (changed) r.setValues(v);
+  r.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
 }
 
 function protect_(range, description) {
@@ -636,6 +639,25 @@ function headerMap_(sh) {
   return m;
 }
 
+/** The column that identifies a row: ID, Email (Leaders) or Setting. */
+function keyCol_(h) {
+  const k = ['ID', 'Email', 'Setting'].find(n => h[n] != null);
+  return k ? h[k] : 0;
+}
+
+/**
+ * Last row that has a value in the key column. Checkbox columns make empty
+ * rows look non-empty (they hold FALSE), so getLastRow() can't be trusted.
+ */
+function lastDataRow_(sh) {
+  const n = sh.getLastRow();
+  if (n < 2) return n;
+  const c = keyCol_(headerMap_(sh));
+  const v = sh.getRange(1, c + 1, n, 1).getValues();
+  for (let i = n - 1; i >= 1; i--) if (v[i][0] !== '' && v[i][0] !== null) return i + 1;
+  return 1;
+}
+
 function col_(sh, h, name) {
   if (h[name] == null) throw new Error(`Column "${name}" is missing on ${sh.getName()}.`);
   return sh.getRange(2, h[name] + 1, sh.getMaxRows() - 1, 1);
@@ -643,7 +665,7 @@ function col_(sh, h, name) {
 
 /** Read a tab into objects keyed by header. Each object has `_row` (sheet row number). */
 function readTable_(k) {
-  const sh = sheet_(k), h = headerMap_(sh), n = sh.getLastRow() - 1;
+  const sh = sheet_(k), h = headerMap_(sh), n = lastDataRow_(sh) - 1;
   if (n < 1) return [];
   const vals = sh.getRange(2, 1, n, sh.getLastColumn()).getValues();
   return vals.map((v, i) => { const o = { _row: i + 2 }; Object.keys(h).forEach(name => { o[name] = v[h[name]]; }); return o; });
@@ -653,7 +675,12 @@ function appendRows_(k, objs) {
   if (!objs.length) return;
   const sh = sheet_(k), h = headerMap_(sh), width = sh.getLastColumn();
   const rows = objs.map(o => { const r = new Array(width).fill(''); Object.keys(o).forEach(name => { if (h[name] != null) r[h[name]] = o[name]; }); return r; });
-  sh.getRange(sh.getLastRow() + 1, 1, rows.length, width).setValues(rows);
+  const at = lastDataRow_(sh) + 1;
+  if (at + rows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), at + rows.length - 1 - sh.getMaxRows() + 100);
+  sh.getRange(at, 1, rows.length, width).setValues(rows);
+  if (h['Active'] != null && typeof SpreadsheetApp.newDataValidation === 'function') {
+    sh.getRange(at, h['Active'] + 1, rows.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  }
 }
 
 function updateRow_(k, row, patch) {
@@ -686,16 +713,17 @@ function cleanLines_(lines) {
 
 function getSetting_(name) {
   const sh = SpreadsheetApp.getActive().getSheetByName(TABS.settings.name);
-  if (!sh || sh.getLastRow() < 2) return '';
-  const v = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().find(r => String(r[0]).trim() === name);
+  if (!sh || lastDataRow_(sh) < 2) return '';
+  const v = sh.getRange(2, 1, lastDataRow_(sh) - 1, 2).getValues().find(r => String(r[0]).trim() === name);
   return v ? v[1] : '';
 }
 
 function setSetting_(name, value) {
   const sh = sheet_('settings');
-  const vals = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues() : [];
+  const last = lastDataRow_(sh);
+  const vals = last > 1 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
   const i = vals.findIndex(r => String(r[0]).trim() === name);
-  if (i >= 0) sh.getRange(i + 2, 2).setValue(value); else sh.appendRow([name, value, '']);
+  if (i >= 0) sh.getRange(i + 2, 2).setValue(value); else sh.getRange(last + 1, 1, 1, 3).setValues([[name, value, '']]);
 }
 
 function withLock_(fn) {
