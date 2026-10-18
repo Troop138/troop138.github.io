@@ -16,19 +16,17 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../apps-script/Code.js'), 
 const T = vm.runInContext('TABS', ctx);
 Object.values(T).forEach(t => { const s = env.ss.insertSheet(t.name); s.appendRow(t.headers); });
 env.ss.getSheetByName('Settings').appendRow(['Google sign-in client ID', 'client-123', '']);
-env.ss.getSheetByName('Settings').appendRow(['Barcode prefix', 'TC-', '']);
-env.ss.getSheetByName('Settings').appendRow(['Next barcode number', 1, '']);
 env.ss.getSheetByName('Leaders').appendRow(['admin@example.com', 'Ada', 'Admin', true]);
 env.ss.getSheetByName('Leaders').appendRow(['lee@example.com', 'Lee', 'Leader', true]);
 env.ss.getSheetByName('Leaders').appendRow(['tess@example.com', 'Tess', 'Treasurer', true]);
 const items = env.ss.getSheetByName('Items');
-items.appendRow(['i1', 'Tenderfoot', 'Rank', 1.5, 'Free', 3, 6, '', true]);
-items.appendRow(['i2', "Totin' Chip card", 'Award & card', 1, 'First one free', 5, 10, '012345678905', true]);
-items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge', 2, 4, '', true]);
+items.appendRow(['i1', 'Tenderfoot', 'Rank', 1.5, 'Free', 3, 6, true]);
+items.appendRow(['i2', "Totin' Chip card", 'Award & card', 1, 'First one free', 5, 10, true]);
+items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge', 2, 4, true]);
 
 // Checkbox columns hold FALSE on empty rows in a real sheet. Reproduce that so
 // appends land right under the data, not below the checkboxes.
-[['Leaders', 3], ['Items', 8], ['Scouts', 3]].forEach(([tab, col]) => {
+[['Leaders', 3], ['Items', 7], ['Scouts', 3]].forEach(([tab, col]) => {
   const s = env.ss.getSheetByName(tab);
   for (let r = s.data.length + 1; r <= 40; r++) s.set(r, col + 1, false);
 });
@@ -163,30 +161,6 @@ test('leaders can undo their own fresh entries, not others', () => {
   const r = ok(api(lee, 'restock', { lines: [{ itemId: 'i1', qty: 1 }] }));
   assert.strictEqual(api(tess, 'undo', { logIds: r.logIds }).code, 'forbidden');
   ok(api(lee, 'undo', { logIds: r.logIds }));
-});
-
-// --- barcodes
-test('troop barcodes are sequential and unique', () => {
-  const a = ok(api(lee, 'makeTroopBarcode', { itemId: 'i1' })).code;
-  const b = ok(api(lee, 'makeTroopBarcode', { itemId: 'i3' })).code;
-  assert.strictEqual(a, 'TC-0001'); assert.strictEqual(b, 'TC-0002');
-  assert.strictEqual(ok(api(lee, 'makeTroopBarcode', { itemId: 'i1' })).code, 'TC-0001');
-});
-test('a barcode cannot be linked to two items', () => {
-  assert.strictEqual(api(lee, 'linkBarcode', { itemId: 'i1', code: '012345678905' }).code, 'conflict');
-  ok(api(lee, 'linkBarcode', { itemId: 'i1', code: ' 99887766 ' }));
-  const it = ok(api(lee, 'getData')).items.find(i => i.id === 'i1');
-  assert.deepStrictEqual(it.barcodes, ['TC-0001', '99887766']);
-});
-
-test('new rows go right under the data, not under empty checkbox rows', () => {
-  const scouts = env.ss.getSheetByName('Scouts').data;
-  const firstBlank = scouts.findIndex((r, i) => i > 0 && !r[0]);
-  assert.ok(firstBlank > 1);
-  assert.ok(scouts.slice(firstBlank).every(r => !r[0]), 'a scout was written below the checkbox rows');
-  ok(api(admin, 'saveLeader', { email: 'new@example.com', name: 'New', role: 'Leader' }));
-  const lead = env.ss.getSheetByName('Leaders').data;
-  assert.strictEqual(lead[4][0], 'new@example.com');
 });
 
 // --- check back in

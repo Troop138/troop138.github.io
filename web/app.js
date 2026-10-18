@@ -13,7 +13,7 @@ const RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 
 const S = {
-  token: '', me: null, settings: { appTitle: 'Troop Closet', troopName: '', barcodePrefix: 'TC-' }, sheetUrl: '',
+  token: '', me: null, settings: { appTitle: 'Troop Closet', troopName: '' }, sheetUrl: '',
   items: new Map(), scouts: new Map(), log: [], charges: [], leaders: [], qty: new Map(),
   ready: false, error: '', busy: false,
   tab: 'give', sub: '', q: '', cat: 'all',
@@ -21,7 +21,6 @@ const S = {
   scoutQ: '', pendingDel: null,
   returned: new Set(), ret: { sel: {}, day: '' },
   report: '', rep: { range: '30', from: '', to: '', group: 'item', scout: '', status: 'Pending', sel: {} },
-  labels: { sel: {}, size: 'small' },
 };
 
 /* ---------- small helpers ---------- */
@@ -60,7 +59,6 @@ const ICONS = {
   restock: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M12 10v7M8.5 13.5h7"/><path d="M7 7V5a2 2 0 012-2h6a2 2 0 012 2v2"/>',
   reports: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
-  scan: '<path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/>',
 };
 const icon = name => el('span', { 'aria-hidden': 'true', html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`, style: 'display:inline-flex' });
 
@@ -116,7 +114,7 @@ async function write(action, args, msg) {
 function signOutLocal() { S.token = ''; S.me = null; S.ready = false; lsSet('tc.token', ''); }
 
 function showSignIn(message) {
-  closeSheet(); stopScanner();
+  closeSheet();
   const app = $('#app'); app.replaceChildren();
   const err = el('div', { class: 'err', text: message || '' });
   const card = el('div', { class: 'card' },
@@ -163,7 +161,7 @@ async function signOut() {
 }
 
 /* ---------- app shell ---------- */
-const TABS = [['stock', 'Stock'], ['give', 'Give out'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
+const TABS = [['give', 'Give out'], ['stock', 'Stock'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
 
 function startApp() {
   S.tab = 'give'; // always open on Give out
@@ -231,14 +229,13 @@ function searchBox(ph, val, on, id) {
   const i = el('input', { class: 'search', id, type: 'search', placeholder: ph, value: val, autocomplete: 'off', enterkeyhint: 'search' });
   i.addEventListener('input', () => on(i.value)); return i;
 }
-function scanBtn() { return el('button', { class: 'btn icon', type: 'button', 'aria-label': 'Scan a barcode', title: 'Scan a barcode', onclick: () => openScanner() }, icon('scan')); }
 function catChips(extra) {
   const opts = [['all', 'All'], ...(extra || []), ...CATS.filter(c => activeItems().some(i => i.cat === c)).map(c => [c, CAT_SHORT[c]])];
   return el('div', { class: 'chips', role: 'group', 'aria-label': 'Filter' }, opts.map(([k, l]) => el('button', { type: 'button', class: 'chip', 'aria-pressed': String(S.cat === k), text: l, onclick: () => { S.cat = k; renderToolbar(); render(); } })));
 }
 function renderToolbar() {
   const tb = $('#toolbar'); if (!tb) return; tb.replaceChildren();
-  const itemSearch = (id) => el('div', { class: 'searchrow' }, searchBox('Search items', S.q, v => { S.q = v; render(); }, id), scanBtn());
+  const itemSearch = (id) => el('div', { class: 'searchrow' }, searchBox('Search items', S.q, v => { S.q = v; render(); }, id));
   if (S.tab === 'stock') tb.append(itemSearch('q-stock'), catChips([['low', 'Low / out']]));
   else if (S.tab === 'give' && S.give.scoutId) tb.append(itemSearch('q-give'), catChips());
   else if (S.tab === 'give') tb.append(searchBox('Who is getting items?', S.scoutQ, v => { S.scoutQ = v; render(); }, 'q-scout'));
@@ -246,7 +243,7 @@ function renderToolbar() {
 }
 function filteredItems() {
   const q = S.q.trim().toLowerCase();
-  return activeItems().filter(i => (!q || i.name.toLowerCase().includes(q) || i.barcodes.some(c => c.toLowerCase() === q)) &&
+  return activeItems().filter(i => (!q || i.name.toLowerCase().includes(q)) &&
     (S.cat === 'all' || (S.cat === 'low' ? status(i) !== 'ok' : i.cat === S.cat)));
 }
 function grouped(items) {
@@ -399,13 +396,13 @@ function viewGive() {
   };
   summaryHook = () => {
     const n = cartCount(g.cart), c = cartCharges(g.cart, g.scoutId);
-    const label = S.busy ? 'Saving…' : n ? `Give ${n} item${n > 1 ? 's' : ''} to ${s.name}` : "Tap + or scan what they're receiving";
+    const label = S.busy ? 'Saving…' : n ? `Give ${n} item${n > 1 ? 's' : ''} to ${s.name}` : "Tap + on what they're receiving";
     const sum = n ? [c.due ? `${money(c.due)} will be charged` : 'No charge', c.waived ? `${money(c.waived)} not charged` : ''].filter(Boolean).join(' · ') : '';
     setAction(label, sum, confirm, !n || S.busy);
     const a = $('#aside'); a.replaceChildren(
       el('h3', { text: `Giving to ${s.name}` }),
       n ? el('div', {}, Object.entries(g.cart).map(([id, l]) => { const it = S.items.get(id); return el('div', { class: 'cartline' }, el('span', { text: it ? it.name : id }), el('span', { text: '×' + l.n })); }))
-        : el('p', { class: 'muted mini', text: 'Tap + on items, or scan their barcodes.' }),
+        : el('p', { class: 'muted mini', text: 'Tap + on items.' }),
       n ? el('div', { class: 'mini muted', text: sum }) : null,
       el('button', { class: 'btn primary', type: 'button', disabled: !n || S.busy, onclick: confirm }, label));
   };
@@ -474,152 +471,16 @@ function viewRestock() {
   };
   summaryHook = () => {
     const n = cartCount(r.cart);
-    const label = S.busy ? 'Saving…' : n ? `Add ${n} item${n > 1 ? 's' : ''} to stock` : "Tap + or scan what you're putting away";
+    const label = S.busy ? 'Saving…' : n ? `Add ${n} item${n > 1 ? 's' : ''} to stock` : "Tap + on what you're putting away";
     const value = Object.entries(r.cart).reduce((s, [id, l]) => s + l.n * ((S.items.get(id) || {}).cost || 0), 0);
     setAction(label, n && value ? `${money(value)} at current cost` : '', confirm, !n || S.busy);
     $('#aside').replaceChildren(el('h3', { text: 'Restocking' }),
       n ? el('div', {}, Object.entries(r.cart).map(([id, l]) => { const it = S.items.get(id); return el('div', { class: 'cartline' }, el('span', { text: it ? it.name : id }), el('span', { text: '+' + l.n })); }))
-        : el('p', { class: 'muted mini', text: 'Tap + on items, or scan their barcodes.' }),
+        : el('p', { class: 'muted mini', text: 'Tap + on items.' }),
       el('button', { class: 'btn primary', type: 'button', disabled: !n || S.busy, onclick: confirm }, label));
   };
   summaryHook();
 }
-
-/* ---------- barcodes & scanning ---------- */
-function codeFormat(code) { if (/^\d{12}$/.test(code)) return 'UPC'; if (/^\d{13}$/.test(code)) return 'EAN13'; if (/^\d{8}$/.test(code)) return 'EAN8'; return 'CODE128'; }
-function drawBarcode(target, code, opts) {
-  const base = Object.assign({ displayValue: false, margin: 0, background: '#ffffff', lineColor: '#000000', height: 40, width: 2 }, opts || {});
-  try { window.JsBarcode(target, code, Object.assign({ format: codeFormat(code) }, base)); }
-  catch (e) { window.JsBarcode(target, code, Object.assign({ format: 'CODE128' }, base)); }
-  return target;
-}
-function barcodeSvg(code, opts) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  return drawBarcode(svg, code, opts);
-}
-const cleanCode = c => String(c || '').trim().toUpperCase().replace(/\s+/g, '');
-function itemByCode(code) { code = cleanCode(code); return activeItems().find(i => i.barcodes.includes(code)); }
-
-async function handleCode(raw) {
-  const code = cleanCode(raw); if (!code) return 'continue';
-  const it = itemByCode(code);
-  if (!it) { stopScanner(); linkCodeSheet(code); return 'close'; }
-  if (S.tab === 'give' && S.give.scoutId) { addToCart(S.give.cart, it.id, 1); toast(`Added ${it.name}`); render(); return 'continue'; }
-  if (S.tab === 'restock') { addToCart(S.restock.cart, it.id, 1); toast(`Added ${it.name}`); render(); return 'continue'; }
-  if (S.tab === 'give') { toast('Pick the scout first, then scan.'); return 'close'; }
-  stopScanner(); itemSheet(it.id); return 'close';
-}
-
-function linkCodeSheet(code) {
-  let q = '';
-  openSheet(() => {
-    const list = el('div', { class: 'list' });
-    const draw = () => {
-      list.replaceChildren();
-      const ql = q.trim().toLowerCase();
-      activeItems().filter(i => !ql || i.name.toLowerCase().includes(ql)).sort(byName).slice(0, 60).forEach(it => list.append(
-        el('button', { type: 'button', class: 'row tap', onclick: async () => {
-          try { await write('linkBarcode', { itemId: it.id, code }, `Barcode saved to ${it.name}`); closeSheet(); handleCode(code); } catch (e) { fail(e); }
-        } }, el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }), el('div', { class: 'sub', text: it.barcodes.length ? `${it.barcodes.length} barcode${it.barcodes.length > 1 ? 's' : ''} already` : 'No barcode yet' })))));
-    };
-    const s = searchBox('Which item is this?', q, v => { q = v; draw(); }, 'linkq');
-    draw();
-    return el('div', { style: 'display:contents' }, sheetHead('New barcode', code),
-      el('p', { class: 'muted', style: 'margin:0', text: "This code isn't linked to an item yet. Pick the item it belongs to. Every scan after this goes straight to it." }), s, list);
-  });
-}
-
-let scanState = null;
-function stopScanner() {
-  if (!scanState) return;
-  const st = scanState; scanState = null;
-  st.stopped = true; clearInterval(st.timer);
-  if (st.zx) { try { st.zx.reset(); } catch (e) { /* ignore */ } }
-  if (st.stream) st.stream.getTracks().forEach(t => t.stop());
-  $('#scanroot').replaceChildren();
-}
-function beep() {
-  try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) { /* ignore */ }
-  try {
-    const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
-    beep.ctx = beep.ctx || new A();
-    const o = beep.ctx.createOscillator(), gn = beep.ctx.createGain();
-    o.frequency.value = 1320; gn.gain.value = 0.08; o.connect(gn).connect(beep.ctx.destination); o.start(); o.stop(beep.ctx.currentTime + 0.08);
-  } catch (e) { /* ignore */ }
-}
-
-async function openScanner() {
-  stopScanner();
-  const root = $('#scanroot');
-  const st = scanState = { stopped: false, last: '', lastAt: 0 };
-  const video = el('video', { playsinline: true, autoplay: true, muted: true }); video.muted = true;
-  const frame = el('div', { class: 'frame' });
-  const statusEl = el('div', { class: 'status', text: 'Starting camera…' });
-  const ctxLabel = S.tab === 'give' && S.give.scoutId ? `Giving to ${S.scouts.get(S.give.scoutId).name}` : S.tab === 'restock' ? 'Restocking' : 'Look up an item';
-  const manual = el('input', { class: 'search', id: 'manualcode', placeholder: 'Or type the code', autocomplete: 'off', autocapitalize: 'characters' });
-  const hit = async (code) => {
-    code = cleanCode(code); if (!code || st.stopped) return;
-    if (code === st.last && Date.now() - st.lastAt < 1800) return;
-    st.last = code; st.lastAt = Date.now(); beep();
-    frame.classList.add('hit'); setTimeout(() => frame.classList.remove('hit'), 350);
-    const it = itemByCode(code);
-    statusEl.textContent = it ? `${it.name}` : `New code ${code}`;
-    await handleCode(code);
-  };
-  root.replaceChildren(el('div', { class: 'scanner', role: 'dialog', 'aria-label': 'Barcode scanner' },
-    el('div', { class: 'top' }, el('span', { class: 'pill', text: ctxLabel }), el('button', { class: 'btn small', type: 'button', onclick: stopScanner }, 'Done')),
-    video, frame,
-    el('div', { class: 'bar' }, statusEl,
-      el('form', { class: 'searchrow', onsubmit: e => { e.preventDefault(); const c = manual.value; manual.value = ''; hit(c); } }, manual, el('button', { class: 'btn primary', type: 'submit' }, 'Add')))));
-  const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
-  try {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('no camera api');
-    let useNative = false;
-    if ('BarcodeDetector' in window) {
-      try { const f = await window.BarcodeDetector.getSupportedFormats(); useNative = f.includes('code_128') && f.includes('upc_a'); } catch (e) { useNative = false; }
-    }
-    if (useNative) {
-      st.stream = await navigator.mediaDevices.getUserMedia(constraints);
-      if (st.stopped) { st.stream.getTracks().forEach(t => t.stop()); return; }
-      video.srcObject = st.stream; await video.play();
-      const det = new window.BarcodeDetector({ formats: ['code_128', 'upc_a', 'upc_e', 'ean_13', 'ean_8', 'code_39', 'qr_code'] });
-      let busy = false;
-      st.timer = setInterval(async () => {
-        if (busy || st.stopped || video.readyState < 2) return; busy = true;
-        try { const r = await det.detect(video); if (r && r[0]) await hit(r[0].rawValue); } catch (e) { /* frame not ready */ }
-        busy = false;
-      }, 180);
-    } else {
-      if (!window.ZXing) { statusEl.textContent = 'Loading scanner…'; await loadScript('vendor/zxing.min.js'); }
-      if (st.stopped) return;
-      const Z = window.ZXing, hints = new Map();
-      hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.QR_CODE]);
-      hints.set(Z.DecodeHintType.TRY_HARDER, true);
-      st.zx = new Z.BrowserMultiFormatReader(hints, 250);
-      await st.zx.decodeFromConstraints(constraints, video, (res) => { if (res) hit(res.getText()); });
-    }
-    if (!st.stopped) statusEl.textContent = 'Point the camera at a barcode';
-  } catch (e) {
-    console.warn(e);
-    statusEl.textContent = (e && e.name === 'NotAllowedError')
-      ? 'Camera access is blocked. Allow the camera for this site in your browser settings, or type the code below.'
-      : "This device's camera isn't available. Type the code below, or use a USB barcode scanner.";
-  }
-}
-
-// USB / Bluetooth barcode scanners type the code fast and press Enter.
-(function keyboardWedge() {
-  let buf = '', last = 0;
-  document.addEventListener('keydown', e => {
-    const t = e.target;
-    if (!S.token || scanState || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'))) return;
-    const now = Date.now();
-    if (now - last > 80) buf = '';
-    last = now;
-    if (e.key === 'Enter') { if (buf.length >= 4) { e.preventDefault(); const c = buf; buf = ''; handleCode(c); } buf = ''; return; }
-    if (e.key.length === 1) buf += e.key;
-  });
-})();
 
 /* ---------- sheets (dialogs) ---------- */
 let sheetFor = null;
@@ -632,7 +493,7 @@ function drawSheet() {
   root.append(bg);
 }
 function closeSheet() { sheetFor = null; const r = $('#sheetroot'); if (r) r.replaceChildren(); }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (scanState) stopScanner(); else closeSheet(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 const sheetHead = (t, sub) => el('div', { class: 'head' }, el('div', {}, el('h2', { text: t }), sub ? el('div', { class: 'muted mini', text: sub }) : null),
   el('button', { class: 'x', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, '×'));
 async function save(action, args, msg, after) { try { const r = await write(action, args, msg); if (after) after(r); return r; } catch (e) { fail(e); } }
@@ -645,13 +506,6 @@ function itemSheet(id) {
     const stockTo = el('input', { id: 'stockto', type: 'number', inputmode: 'numeric', min: '0', value: String(it.stockTo || 0) });
     const count = el('input', { id: 'count', type: 'number', inputmode: 'numeric', min: '0', placeholder: String(q) });
     const recent = S.log.filter(l => l.itemId === id).sort((a, b) => b.at - a.at).slice(0, 8);
-    const prefix = (S.settings.barcodePrefix || 'TC-').toUpperCase();
-    const codes = el('div', { class: 'codes' },
-      it.barcodes.map(c => el('div', { class: 'coderow' }, barcodeSvg(c, { height: 40, width: 1.6 }), el('code', { text: c }),
-        el('button', { class: 'btn small', type: 'button', onclick: () => downloadLabel(it, c) }, 'Save image'),
-        el('button', { class: 'btn small', type: 'button', onclick: () => { closeSheet(); S.labels.sel = { [it.id]: 1 }; go('more', 'labels'); } }, 'Print label'))),
-      !it.barcodes.some(c => c.startsWith(prefix)) ? el('button', { class: 'btn', type: 'button', onclick: () => save('makeTroopBarcode', { itemId: id }, 'Troop barcode made') }, 'Make a troop barcode') : null,
-      el('p', { class: 'mini muted', style: 'margin:0', text: 'To add a council barcode, scan it and pick this item.' }));
 
     let confirmDel = false;
     const delBtn = el('button', { class: 'btn danger', type: 'button', onclick: () => {
@@ -687,7 +541,6 @@ function itemSheet(id) {
       el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); save('updateItem', { id, reorder: Math.max(0, parseInt(reorder.value, 10) || 0), stockTo: Math.max(0, parseInt(stockTo.value, 10) || 0) }, 'Saved'); } },
         el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'reorder', text: 'Reorder at' }), reorder), el('div', { class: 'field' }, el('label', { for: 'stockto', text: 'Stock up to' }), stockTo)),
         el('button', { class: 'btn small', type: 'submit' }, 'Save reorder levels')),
-      el('div', { class: 'stack' }, el('h3', { text: 'Barcodes' }), codes),
       admin ? editForm() : null,
       el('div', {}, el('h3', { text: 'Recent activity' }), recent.length ? recent.map(l => {
         const sc = l.scoutId && S.scouts.get(l.scoutId);
@@ -719,36 +572,7 @@ function itemForm() {
   });
 }
 
-/* ---------- label images & printing ---------- */
-function labelCanvas(it, code, size) {
-  const big = size === 'large';
-  const W = big ? 1200 : 788, H = big ? 600 : 300; // 300 dpi: 4x2in or 2.625x1in
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
-  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
-  const bc = document.createElement('canvas');
-  drawBarcode(bc, code, { height: big ? 300 : 150, width: big ? 5 : 3 });
-  const bw = Math.min(W - 60, bc.width), bh = bc.height * (bw / bc.width);
-  const fs = big ? 64 : 34;
-  g.fillStyle = '#000'; g.textAlign = 'center'; g.textBaseline = 'top';
-  g.font = `600 ${fs}px Barlow, Arial, sans-serif`;
-  let name = it.name; while (g.measureText(name).width > W - 40 && name.length > 4) name = name.slice(0, -2);
-  if (name !== it.name) name = name.trimEnd() + '…';
-  g.fillText(name, W / 2, big ? 30 : 12);
-  const top = (big ? 30 : 12) + fs + (big ? 20 : 8);
-  g.drawImage(bc, (W - bw) / 2, top, bw, Math.min(bh, H - top - fs - 10));
-  g.font = `${Math.round(fs * 0.8)}px ui-monospace, Menlo, Consolas, monospace`;
-  g.textBaseline = 'bottom'; g.fillText(code, W / 2, H - (big ? 24 : 8));
-  return c;
-}
-function downloadBlob(blob, filename) {
-  const a = el('a', { href: URL.createObjectURL(blob), download: filename });
-  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-}
-function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); }
-function downloadLabel(it, code) {
-  labelCanvas(it, code, 'small').toBlob(b => downloadBlob(b, `${slug(it.name)}-${slug(code)}.png`), 'image/png');
-}
-
+/* ---------- printing ---------- */
 function printNode(node, pageCss) {
   const root = $('#printroot'); root.replaceChildren(node);
   let st = document.getElementById('pagestyle');
@@ -962,13 +786,13 @@ function viewMore() {
   const sub = S.sub;
   if (sub) {
     v.append(el('div', { style: 'margin-top:12px' }, el('button', { class: 'btn small', type: 'button', onclick: () => { S.sub = ''; render(); } }, '‹ More')));
-    ({ scouts: viewScouts, history: viewHistory, labels: viewLabels, admin: viewAdmin, share: viewShare })[sub](v);
+    ({ scouts: viewScouts, history: viewHistory, admin: viewAdmin, share: viewShare, paper: viewPaper })[sub](v);
     return;
   }
   const items = [
     ['scouts', 'Scouts', 'Add scouts, see what each has received'],
     ['history', 'History', 'Recent entries, and undo your own'],
-    ['labels', 'Print labels', 'Barcode stickers for bins and bags'],
+    ['paper', 'Print paper log', 'For leaders who would rather write it down'],
     ['share', 'Share the app', 'QR code and link for other leaders'],
     ...(isRole('Admin') ? [['admin', 'Leaders & access', 'Who can sign in, and their roles']] : []),
   ];
@@ -1048,38 +872,6 @@ function viewHistory(v) {
   }
   v.append(el('h2', { style: 'margin-top:12px', text: 'History' }),
     el('p', { class: 'mini muted', text: isRole('Admin') ? 'As admin you can remove any entry. Entries whose charge was transferred to the treasurer can only be removed after the charge is set back to pending.' : 'You can remove your own entries for 24 hours.' }), list);
-}
-
-function viewLabels(v) {
-  const L = S.labels, prefix = (S.settings.barcodePrefix || 'TC-').toUpperCase();
-  const size = el('select', { id: 'lsize' }, el('option', { value: 'small', text: 'Small 1" × 2⅝" (Avery 5160, 30 per sheet)' }), el('option', { value: 'large', text: 'Large 2" × 4" (Avery 5163, 10 per sheet)' }));
-  size.value = L.size; size.onchange = () => { L.size = size.value; render(); };
-  const codeFor = it => it.barcodes.find(c => c.startsWith(prefix)) || it.barcodes[0];
-  const total = Object.values(L.sel).reduce((a, b) => a + b, 0);
-  const list = el('div', { class: 'list' });
-  for (const [c, g] of grouped(activeItems())) {
-    list.append(el('div', { class: 'group-h', text: CAT_SHORT[c] }));
-    g.forEach(it => {
-      const code = codeFor(it), n = L.sel[it.id] || 0;
-      const set = k => { const nv = Math.max(0, n + k); if (nv) L.sel[it.id] = nv; else delete L.sel[it.id]; render(); };
-      list.append(el('div', { class: 'row' }, el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }), el('div', { class: 'sub', text: code || 'No barcode yet' })),
-        code ? el('div', { class: 'stepper' }, el('button', { type: 'button', disabled: !n, 'aria-label': 'Fewer labels', onclick: () => set(-1) }, '−'), el('span', { class: 'n' + (n ? '' : ' zero'), text: String(n) }), el('button', { type: 'button', class: 'plus', 'aria-label': 'More labels', onclick: () => set(1) }, '+'))
-          : el('button', { class: 'btn small', type: 'button', onclick: () => save('makeTroopBarcode', { itemId: it.id }, `Barcode made for ${it.name}`) }, 'Make barcode')));
-    });
-  }
-  const print = () => {
-    const big = L.size === 'large', grid = el('div', { class: 'labels ' + L.size });
-    for (const [id, n] of Object.entries(L.sel)) { const it = S.items.get(id); const code = it && codeFor(it); if (!code) continue; for (let i = 0; i < n; i++) grid.append(el('div', { class: 'label' }, el('div', { class: 'ln', text: it.name }), barcodeSvg(code, { height: big ? 90 : 40, width: big ? 2.4 : 1.4 }), el('div', { class: 'lc', text: code }))); }
-    printNode(grid, big ? '@page{size:letter;margin:0.5in 0.15625in}' : '@page{size:letter;margin:0.5in 0.1875in}');
-  };
-  v.append(el('h2', { style: 'margin-top:12px', text: 'Print labels' }),
-    el('div', { class: 'reportbar' }, el('div', { class: 'field' }, el('label', { for: 'lsize', text: 'Label sheet' }), size)),
-    el('p', { class: 'mini muted', text: 'Print at 100% ("Actual size"), not "Fit to page", so labels line up with the sheet.' }),
-    el('div', { class: 'rowbtns' },
-      el('button', { class: 'btn', type: 'button', onclick: () => { activeItems().forEach(it => { if (codeFor(it)) L.sel[it.id] = L.sel[it.id] || 1; }); render(); } }, 'One of each'),
-      el('button', { class: 'btn', type: 'button', disabled: !total, onclick: () => { L.sel = {}; render(); } }, 'Clear'),
-      el('button', { class: 'btn primary', type: 'button', disabled: !total, onclick: print }, total ? `Print ${total} label${total > 1 ? 's' : ''}` : 'Pick labels to print')),
-    list);
 }
 
 function viewShare(v) {
@@ -1166,9 +958,33 @@ function retEnvelopes() {
   return wrap;
 }
 
+/* ---------- paper log ---------- */
+function viewPaper(v) {
+  const pages = el('input', { id: 'pages', type: 'number', min: '1', max: '20', value: '1', inputmode: 'numeric', style: 'max-width:120px' });
+  v.append(el('h2', { style: 'margin-top:12px', text: 'Paper log' }),
+    el('div', { class: 'card stack', style: 'margin-top:12px' },
+      el('p', { style: 'margin:0', text: 'A sheet to keep in the closet for anyone who would rather not use the app. One item per line. Snap a photo of filled-in pages and send it to whoever enters them.' }),
+      el('div', { class: 'field' }, el('label', { for: 'pages', text: 'Pages' }), pages),
+      el('button', { class: 'btn primary', type: 'button', onclick: () => printNode(paperLog(Math.max(1, Math.min(20, parseInt(pages.value, 10) || 1))), '@page{size:letter landscape;margin:0.4in}') }, 'Print')));
+}
+function paperLog(n) {
+  const cols = [['Date', '10%'], ['Scout (first and last name)', '28%'], ['Item (badge, rank or card)', '37%'], ['Qty', '7%'], ['Given by', '18%']];
+  const cell = 'border:1px solid #000;padding:0 6px;height:0.36in;font:10pt system-ui,sans-serif;text-align:left';
+  const page = () => el('div', { style: 'break-after:page;color:#000' },
+    el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px' },
+      el('div', { style: 'font:700 18pt system-ui,sans-serif', text: [S.settings.troopName, 'Advancement closet log'].filter(Boolean).join(' · ') }),
+      el('div', { style: 'font:10pt system-ui,sans-serif', text: 'Page ____  Entered in app: ☐' })),
+    el('div', { style: 'font:10pt system-ui,sans-serif;margin-bottom:6px', text: 'Write clearly, one item per line. Taking something back to the shelf? Write RETURN in the Qty box.' }),
+    el('table', { style: 'border-collapse:collapse;width:calc(100% - 2px);table-layout:fixed' },
+      el('colgroup', {}, cols.map(([, w]) => el('col', { style: 'width:' + w }))),
+      el('thead', {}, el('tr', {}, cols.map(([t]) => el('th', { style: cell + ';background:#eee;font-weight:700;height:0.3in', text: t })))),
+      el('tbody', {}, Array.from({ length: 18 }, (_, i) => el('tr', {}, cols.map(() => el('td', { style: cell + (i % 2 ? ';background:#f6f6f6' : '') })))))));
+  return el('div', {}, Array.from({ length: n }, page));
+}
+
 /* ---------- boot ---------- */
-setInterval(() => { if (S.token && document.visibilityState === 'visible' && !S.busy && !sheetFor && !scanState) refresh(); }, 60000);
-document.addEventListener('visibilitychange', () => { if (S.token && document.visibilityState === 'visible' && !scanState) refresh(); });
+setInterval(() => { if (S.token && document.visibilityState === 'visible' && !S.busy && !sheetFor) refresh(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (S.token && document.visibilityState === 'visible') refresh(); });
 
 (async function boot() {
   if (DEMO) {

@@ -18,7 +18,7 @@
 const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
-  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Barcodes', 'Active'] },
+  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Active'] },
   scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active', 'First name', 'Last name', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost', 'Returns'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
@@ -34,8 +34,6 @@ const LOG_TYPES = ['out', 'in', 'count', 'return'];
 const SETTINGS_DEFAULTS = [
   ['App title', 'Troop Closet', 'Shown at the top of the app after sign-in'],
   ['Troop name', '', 'For example: Troop 000. Shown after sign-in only'],
-  ['Barcode prefix', 'TC-', 'Start of troop-made barcodes, e.g. TC-0001'],
-  ['Next barcode number', 1, 'Updated by the app'],
   ['Google sign-in client ID', '', 'From Google Cloud console (see README)'],
   ['Session days', 30, 'How long a phone stays signed in'],
   ['Backups to keep', 12, 'Weekly copies kept in the backup folder'],
@@ -88,7 +86,7 @@ function setup() {
   // Starter item list at zero on hand.
   const items = sheet_('items');
   if (lastDataRow_(items) < 2) {
-    const rows = STARTER_ITEMS.map(([n, c, rule, re]) => [id_(), n, c, 0, rule, re, re * 2, '', true]);
+    const rows = STARTER_ITEMS.map(([n, c, rule, re]) => [id_(), n, c, 0, rule, re, re * 2, true]);
     items.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
 
@@ -301,8 +299,6 @@ const ACTIONS = {
   updateScout: (me, a) => withLock_(() => updateScout_(me, a)),
   addItem: (me, a) => { need_(me, ['Admin']); return withLock_(() => addItem_(me, a)); },
   updateItem: (me, a) => withLock_(() => updateItem_(me, a)),
-  linkBarcode: (me, a) => withLock_(() => linkBarcode_(me, a)),
-  makeTroopBarcode: (me, a) => withLock_(() => makeTroopBarcode_(me, a)),
   checkIn: (me, a) => withLock_(() => checkIn_(me, a)),
   setChargeStatus: (me, a) => { need_(me, ['Admin', 'Treasurer']); return withLock_(() => setChargeStatus_(me, a)); },
   saveLeader: (me, a) => { need_(me, ['Admin']); return withLock_(() => saveLeader_(me, a)); },
@@ -395,7 +391,6 @@ function getData_(me) {
     settings: {
       appTitle: String(getSetting_('App title') || 'Troop Closet'),
       troopName: String(getSetting_('Troop name') || ''),
-      barcodePrefix: String(getSetting_('Barcode prefix') || 'TC-'),
     },
     items, scouts, log, charges,
     sheetUrl: me.role === 'Admin' ? SpreadsheetApp.getActive().getUrl() : '',
@@ -413,7 +408,6 @@ function itemOut_(r) {
     id: String(r['ID']), name: String(r['Name']), cat: String(r['Category'] || 'Other'),
     cost: Number(r['Cost']) || 0, rule: CHARGE_RULES.indexOf(r['Charge rule']) >= 0 ? r['Charge rule'] : 'Free',
     reorder: Number(r['Reorder at']) || 0, stockTo: Number(r['Stock to']) || 0,
-    barcodes: String(r['Barcodes'] || '').split(/[,\s]+/).filter(Boolean),
     active: r['Active'] !== false,
   };
 }
@@ -613,7 +607,7 @@ function addItem_(me, a) {
   if (readTable_('items').some(r => r['Active'] !== false && String(r['Name']).toLowerCase() === name.toLowerCase())) {
     throw apiError_('conflict', `${name} is already in the closet.`);
   }
-  const row = Object.assign({ 'ID': id_(), 'Name': name.slice(0, 100), 'Active': true, 'Barcodes': '' }, itemPatch_(a, true));
+  const row = Object.assign({ 'ID': id_(), 'Name': name.slice(0, 100), 'Active': true }, itemPatch_(a, true));
   appendRows_('items', [row]);
   const start = Math.trunc(Number(a.startQty) || 0);
   if (start > 0) appendRows_('log', [{ 'ID': id_(), 'When': new Date(), 'Item ID': row['ID'], 'Item': row['Name'], 'Change': start, 'Type': 'count',
@@ -642,38 +636,6 @@ function itemPatch_(a, withDefaults) {
   if ('reorder' in a || withDefaults) p['Reorder at'] = Math.max(0, Math.trunc(Number(a.reorder) || 0));
   if ('stockTo' in a || withDefaults) p['Stock to'] = Math.max(0, Math.trunc(Number(a.stockTo) || 0));
   return p;
-}
-
-/** Attach a scanned barcode (e.g. a council UPC) to an item. Any leader can do this. */
-function linkBarcode_(me, a) {
-  const code = cleanCode_(a.code);
-  if (!code) throw apiError_('bad_request', 'That barcode could not be read.');
-  const all = readTable_('items');
-  const owner = all.find(r => splitCodes_(r['Barcodes']).indexOf(code) >= 0);
-  if (owner && String(owner['ID']) !== String(a.itemId)) throw apiError_('conflict', `That barcode is already linked to ${owner['Name']}.`);
-  const it = all.find(r => String(r['ID']) === String(a.itemId));
-  if (!it) throw apiError_('bad_request', 'That item no longer exists.');
-  const codes = splitCodes_(it['Barcodes']);
-  if (codes.indexOf(code) < 0) codes.push(code);
-  updateRow_('items', it._row, { 'Barcodes': codes.join(', ') });
-  return { code };
-}
-
-/** Assign the next troop barcode (prefix + 4 digits) to an item. */
-function makeTroopBarcode_(me, a) {
-  const it = itemsById_()[String(a.itemId)];
-  if (!it) throw apiError_('bad_request', 'That item no longer exists.');
-  const prefix = String(getSetting_('Barcode prefix') || 'TC-').toUpperCase();
-  const existing = splitCodes_(it['Barcodes']).find(c => c.indexOf(prefix) === 0);
-  if (existing) return { code: existing };
-  let n = Math.max(1, Math.trunc(Number(getSetting_('Next barcode number')) || 1));
-  const taken = new Set(readTable_('items').flatMap(r => splitCodes_(r['Barcodes'])));
-  let code;
-  do { code = prefix + String(n).padStart(4, '0'); n++; } while (taken.has(code));
-  setSetting_('Next barcode number', n);
-  const codes = splitCodes_(it['Barcodes']); codes.push(code);
-  updateRow_('items', it._row, { 'Barcodes': codes.join(', ') });
-  return { code };
 }
 
 /** Older versions called this "Posted". */
@@ -821,8 +783,6 @@ function withLock_(fn) {
   try { return fn(); } finally { SpreadsheetApp.flush(); lock.releaseLock(); }
 }
 
-function cleanCode_(c) { return String(c || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 64); }
-function splitCodes_(s) { return String(s || '').split(/[,\s]+/).map(cleanCode_).filter(Boolean); }
 function id_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 12); }
 function round2_(n) { return Math.round(n * 100) / 100; }
 function time_(v) { return v instanceof Date ? v.getTime() : (v ? new Date(v).getTime() || 0 : 0); }

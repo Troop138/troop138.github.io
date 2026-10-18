@@ -1,6 +1,6 @@
 # Troop Closet
 
-A phone-first inventory app for a Scouts BSA troop's advancement closet: rank patches, merit badges, cards and awards. Leaders sign in with Google, give items to scouts or restock in a few taps, scan council or troop barcodes, and the treasurer marks charges as posted to scout accounts.
+A phone-first inventory app for a Scouts BSA troop's advancement closet: rank patches, merit badges, cards and awards. Leaders sign in with Google, give items to scouts or restock in a few taps, and charges are tracked until they're transferred to the treasurer. A printable paper log covers anyone who'd rather write it down.
 
 **Try it with sample data:** open the site with `?demo=1` at the end of the address. Nothing is saved.
 
@@ -24,17 +24,16 @@ HANDOFF.md      how to hand the closet to the next person
 
 ## What leaders can do
 
-- **Give out:** pick a scout, tap + (or scan) each item, confirm. Charges follow each item's charge rule. A leader can mark a charge "No charge" with a reason.
-- **Restock:** tap + or scan what you're putting away, with an optional note like "Scout Shop order".
-- **Scan:** live camera scanning on phones; USB or Bluetooth scanners work on computers. Unknown codes (like a council UPC) get linked to an item once, then every later scan goes straight to it.
-- **Troop barcodes and labels:** make a troop barcode for any item, save it as an image for a sticker printer, or print sheets of Avery 5160 (small) or 5163 (large) labels.
+- **Give out:** pick a scout, tap + on each item, confirm. Charges follow each item's charge rule. A leader can mark a charge "No charge" with a reason.
+- **Restock:** tap + on what you're putting away, with an optional note like "Scout Shop order".
+- **Paper log:** More → Print paper log. Leaders who don't use the app write one item per line; a photo of the page gets entered later.
 - **Reports:** current inventory with shelf value, reorder list, activity by date range, scout history, charges, and shelf-count fixes. Each downloads as CSV or prints.
 
 Roles, set on the **Leaders** tab:
 
 | Role | Can |
 |---|---|
-| Leader | Give out, restock, shelf counts, add scouts (first name, last name, patrol), link barcodes, reports. Undo their own entries for 24 hours. |
+| Leader | Give out, restock, shelf counts, add scouts (first name, last name, patrol), reports. Undo their own entries for 24 hours. |
 | Treasurer | Everything a leader can, plus mark charges Transferred to Treasurer or Waived. |
 | Admin | Everything, plus items, costs, charge rules, leaders, and removing any entry. |
 
@@ -118,8 +117,7 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 1. Open the site, sign in as the troop account, and go to **More → Leaders & access**. Add your own Gmail as **Admin**, plus the treasurer and other leaders. You can also edit the **Leaders** tab directly.
 2. On the **Stock** tab, open each item to set its cost and charge rule, or edit the **Items** tab.
 3. Use **Restock** (or **Set count** on an item) to enter what's on the shelf.
-4. Scan council barcodes as items come in. Make troop barcodes and print labels for anything without one.
-5. Use **More → Share the app** for a QR code leaders can scan, then have them add it to their home screen.
+4. Use **More → Share the app** for a QR code leaders can scan, then have them add it to their home screen.
 
 ## Check back in
 
@@ -133,7 +131,7 @@ The app reads columns by header name, so you can reorder columns, but don't rena
 
 | Tab | Safe to edit | Leave alone |
 |---|---|---|
-| Items | Name, Category, Cost, Charge rule, Reorder at, Stock to, Barcodes, Active | ID |
+| Items | Name, Category, Cost, Charge rule, Reorder at, Stock to, Active | ID |
 | Scouts | Name, Patrol, Active | ID |
 | Leaders | Everything (this is how you manage access) | |
 | Charges | Status (dropdown). The date and who changed it are filled in automatically. | ID, Amount |
@@ -160,5 +158,4 @@ Protected ranges show a warning before you edit something the app depends on. To
 ## Known limits
 
 - **iPhone home-screen app and Google sign-in:** Google's sign-in popup can be unreliable inside a home-screen web app on some iOS versions. If sign-in doesn't complete there, sign in once in Safari, then reopen the home-screen icon, or just use it in Safari.
-- **Camera scanning** needs HTTPS (GitHub Pages provides it) and camera permission for the site.
 - **Apps Script quotas:** fine for a troop. Each request takes a second or two because it runs on Google's servers.

@@ -13,7 +13,7 @@
       const ss = env.ss;
       Object.values(TABS).forEach(t => ss.insertSheet(t.name).appendRow(t.headers));
       const set = ss.getSheetByName('Settings');
-      [['App title', 'Troop Closet'], ['Troop name', 'Demo Troop'], ['Barcode prefix', 'TC-'], ['Next barcode number', 1],
+      [['App title', 'Troop Closet'], ['Troop name', 'Demo Troop'], 
         ['Google sign-in client ID', 'demo-client'], ['Session days', 30]].forEach(r => set.appendRow([r[0], r[1], '']));
       ss.getSheetByName('Leaders').appendRow(['demo.admin@example.com', 'Demo Admin', 'Admin', true]);
       ss.getSheetByName('Leaders').appendRow(['demo.leader@example.com', 'Demo Leader', 'Leader', true]);
