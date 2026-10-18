@@ -16,7 +16,7 @@ const S = {
   token: '', me: null, settings: { appTitle: 'Troop Closet', troopName: '', barcodePrefix: 'TC-' }, sheetUrl: '',
   items: new Map(), scouts: new Map(), log: [], charges: [], leaders: [], qty: new Map(),
   ready: false, error: '', busy: false,
-  tab: 'stock', sub: '', q: '', cat: 'all',
+  tab: 'give', sub: '', q: '', cat: 'all',
   give: { scoutId: null, cart: {} }, restock: { cart: {}, note: '' },
   scoutQ: '', pendingDel: null,
   report: '', rep: { range: '30', from: '', to: '', group: 'item', scout: '', status: 'Pending', sel: {} },
@@ -164,7 +164,7 @@ async function signOut() {
 const TABS = [['stock', 'Stock'], ['give', 'Give out'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
 
 function startApp() {
-  try { const t = lsGet('tc.tab'); if (TABS.some(x => x[0] === t)) S.tab = t; } catch (e) { /* ignore */ }
+  S.tab = 'give'; // always open on Give out
   const app = $('#app'); app.replaceChildren();
   app.append(
     el('div', { class: 'wrap' },
@@ -181,7 +181,7 @@ function startApp() {
 }
 function go(tab, sub) {
   S.tab = tab; S.sub = sub || ''; S.q = ''; S.cat = 'all'; if (tab !== 'reports') S.report = '';
-  lsSet('tc.tab', tab); closeSheet(); render(true); window.scrollTo(0, 0);
+  closeSheet(); render(true); window.scrollTo(0, 0);
 }
 
 let raf = 0;
