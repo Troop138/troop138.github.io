@@ -64,7 +64,7 @@ aside.side{display:none}
 .pill{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted)}
 .pill.low,.pill.pending{background:var(--warn-bg);color:var(--warn-fg)}
 .pill.out{background:var(--bad-bg);color:var(--bad-fg)}
-.pill.eagle,.pill.posted{background:var(--ok-bg);color:var(--ok-fg)}
+.pill.eagle,.pill.transferred-to-treasurer{background:var(--ok-bg);color:var(--ok-fg)}
 .pill.charge{background:var(--warn-bg);color:var(--warn-fg);text-transform:none;letter-spacing:0;font-size:.78rem}
 .stepper{display:flex;align-items:center;gap:4px;flex:none}
 .stepper button{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.4rem;font-weight:600;line-height:1}

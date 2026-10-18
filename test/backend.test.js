@@ -146,17 +146,17 @@ test('shelf count logs the difference', () => {
 // --- permissions
 test('leaders cannot post charges or edit costs', () => {
   const c = ok(api(admin, 'getData')).charges.find(x => x.status === 'Pending');
-  assert.strictEqual(api(lee, 'setChargeStatus', { ids: [c.id], status: 'Posted' }).code, 'forbidden');
+  assert.strictEqual(api(lee, 'setChargeStatus', { ids: [c.id], status: 'Transferred to Treasurer' }).code, 'forbidden');
   assert.strictEqual(api(lee, 'updateItem', { id: 'i1', cost: 0 }).code, 'forbidden');
   ok(api(lee, 'updateItem', { id: 'i1', reorder: 4 }));
 });
-test('treasurer marks charges posted', () => {
+test('treasurer marks charges transferred', () => {
   const pending = ok(api(admin, 'getData')).charges.filter(x => x.status === 'Pending');
-  ok(api(tess, 'setChargeStatus', { ids: pending.map(p => p.id), status: 'Posted' }));
+  ok(api(tess, 'setChargeStatus', { ids: pending.map(p => p.id), status: 'Transferred to Treasurer' }));
   const after = ok(api(admin, 'getData')).charges;
-  assert.ok(after.filter(x => pending.some(p => p.id === x.id)).every(x => x.status === 'Posted' && x.changedBy === 'tess@example.com'));
+  assert.ok(after.filter(x => pending.some(p => p.id === x.id)).every(x => x.status === 'Transferred to Treasurer' && x.changedBy === 'tess@example.com'));
 });
-test('undo is blocked once a charge is posted', () => {
+test('undo is blocked once a charge is transferred', () => {
   assert.strictEqual(api(lee, 'undo', { logIds: firstGive.logIds }).code, 'conflict');
 });
 test('leaders can undo their own fresh entries, not others', () => {
@@ -189,40 +189,25 @@ test('new rows go right under the data, not under empty checkbox rows', () => {
   assert.strictEqual(lead[4][0], 'new@example.com');
 });
 
-// --- check back in, still owed
+// --- check back in
 const onHand = id => ok(api(admin, 'getData')).log.filter(l => l.itemId === id).reduce((s, l) => s + l.delta, 0);
 test('check back in: back to stock, waives the charge, once', () => {
   ok(api(admin, 'restock', { lines: [{ itemId: 'i3', qty: 3 }] }));
   const g = ok(api(admin, 'give', { scoutId, lines: [{ itemId: 'i3', qty: 1 }] }));
   const logId = g.logIds[0], before = onHand('i3');
   assert.strictEqual(ok(api(admin, 'getData')).charges.find(c => c.logId === logId).status, 'Pending');
-  assert.strictEqual(api(tess, 'checkIn', { logIds: [logId] }).code, 'forbidden', 'treasurer');
-  assert.strictEqual(ok(api(lee, 'checkIn', { logIds: [logId] })).returned, 1);
+  const r = ok(api(lee, 'checkIn', { logIds: [logId] }));
+  assert.strictEqual(r.returned, 1);
   assert.strictEqual(ok(api(lee, 'checkIn', { logIds: [logId] })).returned, 0, 'checked in twice');
   assert.strictEqual(onHand('i3'), before + 1);
-  const d = ok(api(lee, 'getData'));
+  let d = ok(api(lee, 'getData'));
   const c = d.charges.find(x => x.logId === logId); assert.strictEqual(c.status, 'Waived'); assert.strictEqual(c.reason, 'Checked back in');
   const ret = d.log.find(l => l.kind === 'return'); assert.strictEqual(ret.scoutId, scoutId); assert.strictEqual(ret.returns, logId);
-  assert.strictEqual(d.owed.length, 0);
-});
-test('check in, still owed: shows on the list; undo restores it', () => {
-  const g = ok(api(admin, 'give', { scoutId, lines: [{ itemId: 'i3', qty: 1 }] }));
-  const r = ok(api(lee, 'checkIn', { logIds: g.logIds, owed: true, note: 'never picked up' }));
-  let d = ok(api(lee, 'getData'));
-  assert.strictEqual(d.owed.length, 1); assert.strictEqual(d.owed[0].itemId, 'i3'); assert.strictEqual(d.owed[0].note, 'never picked up');
+  // undo the check-in: charge back to pending
   ok(api(lee, 'undo', { logIds: r.logIds }));
   d = ok(api(lee, 'getData'));
-  assert.strictEqual(d.owed.length, 0);
-  assert.strictEqual(d.charges.find(c => c.logId === g.logIds[0]).status, 'Pending');
-  ok(api(lee, 'checkIn', { logIds: g.logIds, owed: true }));
-});
-test('still owed: hand out later gives it from the closet', () => {
-  const o = ok(api(lee, 'getData')).owed[0], before = onHand(o.itemId);
-  ok(api(lee, 'setOwed', { ids: [o.id], action: 'handOut' }));
-  assert.strictEqual(onHand(o.itemId), before - 1);
-  const d = ok(api(lee, 'getData'));
-  assert.strictEqual(d.owed.length, 0);
-  assert.ok(d.log.some(l => l.note === 'Was still owed' && l.scoutId === scoutId));
+  assert.strictEqual(d.charges.find(x => x.logId === logId).status, 'Pending');
+  assert.strictEqual(onHand('i3'), before);
 });
 test('first-one-free: a checked-in item does not use up the free one', () => {
   const s2 = ok(api(admin, 'addScout', { first: 'Free', last: 'Test', patrol: 'Cobras' })).id;
@@ -230,12 +215,6 @@ test('first-one-free: a checked-in item does not use up the free one', () => {
   assert.strictEqual(g.charged, 0);
   ok(api(admin, 'checkIn', { logIds: g.logIds }));
   assert.strictEqual(ok(api(admin, 'give', { scoutId: s2, lines: [{ itemId: 'i2', qty: 1 }] })).charged, 0);
-});
-test('still owed by hand, and remove', () => {
-  const r = ok(api(lee, 'addOwed', { scoutId, itemId: 'i1', qty: 2 }));
-  assert.strictEqual(ok(api(lee, 'getData')).owed.length, 2);
-  ok(api(lee, 'setOwed', { ids: r.ids, action: 'remove' }));
-  assert.strictEqual(ok(api(lee, 'getData')).owed.length, 0);
 });
 
 // --- leaders

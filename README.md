@@ -35,7 +35,7 @@ Roles, set on the **Leaders** tab:
 | Role | Can |
 |---|---|
 | Leader | Give out, restock, shelf counts, add scouts (first name, last name, patrol), link barcodes, reports. Undo their own entries for 24 hours. |
-| Treasurer | Everything a leader can, plus mark charges Posted or Waived. |
+| Treasurer | Everything a leader can, plus mark charges Transferred to Treasurer or Waived. |
 | Admin | Everything, plus items, costs, charge rules, leaders, and removing any entry. |
 
 When a leader adds a scout, the scout is flagged **Needs roster update** and every admin gets an email. Admins see a notice in the app (More → Scouts), update the scout's details on the troop roster, then tap **Mark updated**. Only admins can edit or archive scouts.
@@ -48,7 +48,7 @@ Charge rules, set per item:
 | Always charge | Charged every time |
 | First one free | Free the first time that scout gets it, charged after that |
 
-Charges start **Pending**. The treasurer marks them **Posted** once they're on the scout's account, or **Waived** with a reason.
+Charges start **Pending** (money the scout owes). When you send them to the treasurer, mark them **Transferred to Treasurer** (Reports → Charges), or **Waived** with a reason. A transfer marked by mistake can be set back to Pending.
 
 ## Setup
 
@@ -121,11 +121,10 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 4. Scan council barcodes as items come in. Make troop barcodes and print labels for anything without one.
 5. Use **More → Share the app** for a QR code leaders can scan, then have them add it to their home screen.
 
-## Check back in & still owed
+## Check back in
 
 - Every give-out on a scout's page has a **Check back in** button. It puts the item back in stock and waives any pending charge.
-- **Reports → Check back in & still owed** lists everything given out in the last 120 days, grouped by day, patrol and scout, with a printable envelope list. Tick the items nobody picked up and choose **Check back in** or **Check in, still owed**.
-- **Still owed** goes on the "Still owed" tab and shows on the scout's page with a **Hand out** button. Leaders and admins can use all of this; treasurers can view it.
+- **Reports → Check back in** lists everything given out in the last 120 days, grouped by day, patrol and scout, with a printable envelope list. Tick the items nobody picked up and check them back in. Leaders and admins can do this; treasurers can't.
 - Court of honor give-outs are entered in bulk straight into the Log (and Charges for items that cost money), outside the app.
 
 ## Editing the sheet by hand
