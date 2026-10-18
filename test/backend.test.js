@@ -63,6 +63,12 @@ test('rejects people not on the leader list', () => {
   assert.strictEqual(call('login', { idToken: 'x' }).code, 'not_a_leader');
 });
 
+test('login works the way the web page sends it (token inside args)', () => {
+  ctx.tokeninfo = { aud: 'client-123', iss: 'https://accounts.google.com', email: 'lee@example.com', email_verified: 'true', exp: String(Math.floor(Date.now() / 1000) + 3600) };
+  const r = call('login', { args: { idToken: 'x' } });
+  assert.ok(r.ok, JSON.stringify(r));
+});
+
 const admin = login('ADMIN@example.com');
 const lee = login('lee@example.com');
 const tess = login('tess@example.com');

@@ -43,7 +43,7 @@
     },
     login(email) {
       window.tokeninfo = { aud: 'demo-client', iss: 'accounts.google.com', email, email_verified: 'true', exp: String(Math.floor(Date.now() / 1000) + 3600) };
-      return this.call({ action: 'login', idToken: 'demo' }).data.token;
+      return this.call({ action: 'login', args: { idToken: 'demo' } }).data.token;
     },
     revoke(tok) { this.call({ action: 'logout', token: tok }); },
     call(body) { return JSON.parse(window.doPost({ postData: { contents: JSON.stringify(body) } }).body); },

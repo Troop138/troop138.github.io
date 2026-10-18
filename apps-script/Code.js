@@ -273,7 +273,7 @@ function doPost(e) {
   catch (err) { return json_({ ok: false, code: 'bad_request', error: 'Request was not valid JSON.' }); }
   try {
     const action = String(req.action || '');
-    if (action === 'login') return json_({ ok: true, data: login_(req.idToken) });
+    if (action === 'login') return json_({ ok: true, data: login_(req.idToken || (req.args && req.args.idToken)) });
     const me = sessionUser_(req.token);
     const fn = ACTIONS[action];
     if (!fn) throw apiError_('bad_request', 'Unknown action.');
