@@ -7,8 +7,8 @@ const CFG = window.CLOSET_CONFIG || {};
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo') || CFG.apiUrl === 'demo';
 
-const CATS = ['Rank', 'Eagle-required merit badge', 'Merit badge', 'Award & card', 'Other'];
-const CAT_SHORT = { 'Rank': 'Ranks', 'Eagle-required merit badge': 'Eagle-req. MB', 'Merit badge': 'Merit badges', 'Award & card': 'Awards & cards', 'Other': 'Other' };
+const CATS = ['Rank', 'Rank pin', 'Eagle-required merit badge', 'Merit badge', 'Eagle', 'Award & card', 'Uniform & patches', 'Other'];
+const CAT_SHORT = { 'Rank': 'Ranks', 'Rank pin': 'Rank pins', 'Eagle-required merit badge': 'Eagle-req. MB', 'Merit badge': 'Merit badges', 'Eagle': 'Eagle', 'Award & card': 'Awards & cards', 'Uniform & patches': 'Uniform & patches', 'Other': 'Other' };
 const RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 
