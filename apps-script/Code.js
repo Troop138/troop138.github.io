@@ -504,16 +504,23 @@ function checkIn_(me, a) {
   return { returned: rows.length, logIds: rows.map(r => r['ID']) };
 }
 
+/**
+ * Restock: add items to the shelf. Each line can carry the price paid each; when it differs from the
+ * item's cost, the item's cost is updated (so future charges and inventory value use the new price).
+ */
 function restock_(me, a) {
   const lines = cleanLines_(a.lines), items = itemsById_(), now = new Date(), note = String(a.note || '').slice(0, 200);
+  const priceChanges = [];
   const rows = lines.map(l => {
     const it = items[l.itemId];
     if (!it) throw apiError_('bad_request', 'One of those items was removed. Refresh and try again.');
+    const cost = Number(it['Cost']) || 0, paid = l.price !== undefined ? l.price : cost;
+    if (Math.abs(paid - cost) > 0.004) { updateRow_('items', it._row, { 'Cost': paid }); priceChanges.push(it['Name']); }
     return { 'ID': id_(), 'When': now, 'Item ID': l.itemId, 'Item': it['Name'], 'Change': l.qty, 'Type': 'in',
-      'Scout ID': '', 'Scout': '', 'Note': note, 'Logged by': me.email, 'Unit cost': Number(it['Cost']) || 0 };
+      'Scout ID': '', 'Scout': '', 'Note': note, 'Logged by': me.email, 'Unit cost': paid };
   });
   appendRows_('log', rows);
-  return { logIds: rows.map(r => r['ID']) };
+  return { logIds: rows.map(r => r['ID']), priceChanges };
 }
 
 /** Shelf count: logs the difference between what's counted and what the app thinks is there. */
@@ -768,6 +775,8 @@ function cleanLines_(lines) {
     merged[k] = merged[k] || { itemId: k, qty: 0, waiveReason: '' };
     merged[k].qty += q;
     if (l.waiveReason) merged[k].waiveReason = String(l.waiveReason);
+    const price = Number(l.price);
+    if (l.price !== undefined && l.price !== null && l.price !== '' && isFinite(price) && price >= 0 && price < 10000) merged[k].price = round2_(price);
   });
   const out = Object.keys(merged).map(k => merged[k]);
   if (!out.length) throw apiError_('bad_request', 'Add at least one item.');

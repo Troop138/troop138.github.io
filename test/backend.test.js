@@ -198,6 +198,15 @@ test('new item names are capitalized', () => {
   assert.strictEqual(ok(api(admin, 'getData')).items.find(x => x.id === r.id).name, 'Citizenship in the World (Older Style)');
 });
 
+test('restock with a new price paid updates the item cost', () => {
+  const r = ok(api(lee, 'restock', { lines: [{ itemId: 'i1', qty: 2, price: 1.75 }] }));
+  assert.deepStrictEqual(r.priceChanges, ['Tenderfoot']);
+  const d = ok(api(lee, 'getData'));
+  assert.strictEqual(d.items.find(x => x.id === 'i1').cost, 1.75);
+  assert.strictEqual(d.log.find(l => l.id === r.logIds[0]).unitCost, 1.75);
+  assert.deepStrictEqual(ok(api(lee, 'restock', { lines: [{ itemId: 'i1', qty: 1, price: 1.75 }] })).priceChanges, []);
+});
+
 // --- leaders
 test('removing a leader signs them out', () => {
   ok(api(admin, 'saveLeader', { email: 'lee@example.com', name: 'Lee', role: 'Leader', active: false }));

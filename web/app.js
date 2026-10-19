@@ -333,6 +333,15 @@ function cartRows(cart, mode) {
       const set = k => { addToCart(cart, it.id, k); render(); };
       const main = el('div', { class: 'main' }, nameEl(it),
         el('div', { class: 'onhand' + (short ? ' short' : ''), text: short ? `Only ${have} on hand` : `${have} on hand` + (mode === 'restock' && n ? ` → ${have + n}` : '') }));
+      if (mode === 'restock' && n) {
+        // Price paid this time; defaults to the item's current cost (the last price paid).
+        if (line.price == null) line.price = (it.cost || 0).toFixed(2);
+        const inp = el('input', { id: 'price-' + it.id, type: 'number', inputmode: 'decimal', step: '0.01', min: '0', value: line.price, style: 'max-width:110px;min-height:38px;padding:6px 10px', 'aria-label': `Price paid each for ${it.name}` });
+        inp.addEventListener('input', () => { line.price = inp.value; renderCartSummary(); });
+        const changed = Math.abs((Number(line.price) || 0) - (it.cost || 0)) > 0.004;
+        main.append(el('div', { class: 'sub', style: 'align-items:center;gap:8px;margin-top:4px' }, el('label', { for: 'price-' + it.id, class: 'mini muted', text: 'Paid each $' }), inp,
+          changed ? el('span', { class: 'pill', text: `was ${money(it.cost)}` }) : null));
+      }
       if (mode === 'give' && n) {
         const cq = chargedQty(it, S.give.scoutId, n);
         if (cq > 0) {
@@ -454,19 +463,19 @@ function viewRestock() {
   v.append(cartRows(r.cart, 'restock'));
   const confirm = async () => {
     const n = cartCount(r.cart);
-    const lines = Object.entries(r.cart).map(([itemId, l]) => ({ itemId, qty: l.n }));
+    const lines = Object.entries(r.cart).map(([itemId, l]) => ({ itemId, qty: l.n, price: l.price != null && l.price !== '' ? Number(l.price) : undefined }));
     try {
       const res = await write('restock', { lines, note: r.note.trim() });
       const undo = async () => { try { await write('undo', { logIds: res.logIds }, 'Undone'); } catch (e) { fail(e); } };
-      toast(`Added ${n} item${n > 1 ? 's' : ''} to stock`, undo);
+      toast(`Added ${n} item${n > 1 ? 's' : ''} to stock` + (res.priceChanges && res.priceChanges.length ? ` · new price for ${res.priceChanges.join(', ')}` : ''), undo);
       r.cart = {}; r.note = ''; S.q = ''; renderToolbar(); render();
     } catch (e) { fail(e); }
   };
   summaryHook = () => {
     const n = cartCount(r.cart);
     const label = S.busy ? 'Saving…' : n ? `Add ${n} item${n > 1 ? 's' : ''} to stock` : "Tap + on what you're putting away";
-    const value = Object.entries(r.cart).reduce((s, [id, l]) => s + l.n * ((S.items.get(id) || {}).cost || 0), 0);
-    setAction(label, n && value ? `${money(value)} at current cost` : '', confirm, !n || S.busy);
+    const value = Object.entries(r.cart).reduce((s, [id, l]) => s + l.n * (l.price != null && l.price !== '' ? Number(l.price) || 0 : ((S.items.get(id) || {}).cost || 0)), 0);
+    setAction(label, n && value ? `${money(value)} spent` : '', confirm, !n || S.busy);
     $('#aside').replaceChildren(el('h3', { text: 'Restocking' }),
       n ? el('div', {}, Object.entries(r.cart).map(([id, l]) => { const it = S.items.get(id); return el('div', { class: 'cartline' }, el('span', { text: it ? it.name : id }), el('span', { text: '+' + l.n })); }))
         : el('p', { class: 'muted mini', text: 'Tap + on items.' }),
