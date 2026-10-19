@@ -104,7 +104,7 @@ function applyData(d) {
     S.log = d.log; S.charges = d.charges; S.leaders = d.leaders || [];
     S.returned = new Set(S.log.filter(l => l.kind === 'return' && l.returns).map(l => l.returns));
     recount();
-    S.error = ''; S.ready = true;
+    S.error = ''; S.ready = true; S.loadedAt = Date.now();
 }
 async function refresh() {
   try { applyData(await api('getData')); }
@@ -119,14 +119,19 @@ async function removeEntries(ids, msg) {
   S.pending = (S.pending || 0) + 1; render(); toast('Removing…');
   try { await send('undo', { logIds: ids }); toast(msg); }
   catch (e) { S.log = before; S.charges = beforeCh; recount(); fail(e); }
-  finally { S.pending--; soon(); }
+  finally { done(); }
 }
 /** Send a change; the reply carries the updated closet, so one round trip is enough. */
+let latestFresh = null;
 async function send(action, args) {
   const r = await api(action, args);
-  if (freshData) { applyData(freshData); freshData = null; } else await refresh();
+  if (freshData) { latestFresh = freshData; freshData = null; }
+  if (!S.pending) settle();
   return r;
 }
+/** Apply the newest closet from the server once nothing else is still saving (so it can't undo a newer on-screen change). */
+function settle() { if (!S.pending && latestFresh) { applyData(latestFresh); latestFresh = null; render(); } }
+function done() { S.pending = Math.max(0, (S.pending || 0) - 1); settle(); soon(); }
 async function write(action, args, msg) {
   S.busy = true; render();
   try { const r = await send(action, args); if (msg) toast(msg); return r; }
@@ -432,7 +437,7 @@ function viewGive() {
       lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) + l.qty));
       if (!g.scoutId && !cartCount(g.cart)) { g.scoutId = scoutId; g.cart = cart; renderToolbar(); }
       toast(`Not saved: ${(e && e.message) || "couldn't reach the closet"} Your items are still in the cart.`);
-    } finally { S.pending--; soon(); }
+    } finally { done(); }
   };
   summaryHook = () => {
     const n = cartCount(g.cart), c = cartCharges(g.cart, g.scoutId);
@@ -503,7 +508,7 @@ function viewRestock() {
       lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) - l.qty));
       if (!cartCount(r.cart)) { r.cart = cart; r.note = note; renderToolbar(); }
       toast(`Not saved: ${(e && e.message) || "couldn't reach the closet"} Your items are still in the list.`);
-    } finally { S.pending--; soon(); }
+    } finally { done(); }
   };
   summaryHook = () => {
     const n = cartCount(r.cart);
@@ -532,7 +537,28 @@ function closeSheet() { sheetFor = null; const r = $('#sheetroot'); if (r) r.rep
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 const sheetHead = (t, sub) => el('div', { class: 'head' }, el('div', {}, el('h2', { text: t }), sub ? el('div', { class: 'muted mini', text: sub }) : null),
   el('button', { class: 'x', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, '×'));
-async function save(action, args, msg, after) { try { const r = await write(action, args, msg); if (after) after(r); return r; } catch (e) { fail(e); } }
+// Changes the screen can show right away; the save then happens in the background.
+const OPTIMISTIC = {
+  updateItem(a) { const it = S.items.get(a.id); if (!it) return; const n = Object.assign({}, it);
+    ['name', 'cat', 'cost', 'rule', 'reorder', 'eagleReq', 'active'].forEach(k => { if (k in a) n[k] = a[k]; }); S.items = new Map(S.items).set(a.id, n); },
+  updateScout(a) { const sc = S.scouts.get(a.id); if (!sc) return; const n = Object.assign({}, sc);
+    if ('first' in a) { n.first = a.first.trim(); n.last = a.last.trim(); n.name = `${n.first} ${n.last}`; }
+    if ('active' in a) n.active = !!a.active; if ('updated' in a) n.needsUpdate = !a.updated; S.scouts = new Map(S.scouts).set(a.id, n); },
+  setChargeStatus(a) { const ids = new Set(a.ids); S.charges = S.charges.map(c => ids.has(c.id) ? Object.assign({}, c, { status: a.status, reason: a.status === 'Waived' ? a.reason : c.reason, changedBy: S.me.email, changedAt: Date.now() }) : c); },
+  checkIn(a) { const ids = new Set(a.logIds), now = Date.now();
+    const outs = S.log.filter(l => ids.has(l.id) && l.kind === 'out' && !S.returned.has(l.id));
+    S.log = S.log.concat(outs.map(o => Object.assign({}, o, { id: 'tmp' + o.id, at: now, delta: -o.delta, kind: 'return', returns: o.id, note: 'Checked back in', by: S.me.email })));
+    S.returned = new Set([...S.returned, ...outs.map(o => o.id)]);
+    S.charges = S.charges.map(c => ids.has(c.logId) && c.status === 'Pending' ? Object.assign({}, c, { status: 'Waived', reason: 'Checked back in' }) : c); recount(); },
+};
+async function save(action, args, msg, after) {
+  if (!OPTIMISTIC[action]) { try { const r = await write(action, args, msg); if (after) after(r); return r; } catch (e) { fail(e); return; } }
+  const snap = { items: S.items, scouts: S.scouts, charges: S.charges, log: S.log, returned: S.returned, qty: S.qty };
+  OPTIMISTIC[action](args); if (after) after({}); S.pending = (S.pending || 0) + 1; render(); if (msg) toast(msg);
+  try { return await send(action, args); }
+  catch (e) { Object.assign(S, snap); fail(e); }
+  finally { done(); }
+}
 
 function itemSheet(id) {
   openSheet(() => {
@@ -573,7 +599,9 @@ function itemSheet(id) {
       el('form', { class: 'grid2', onsubmit: async e => {
         e.preventDefault(); const t = parseInt(count.value, 10); if (isNaN(t) || t < 0) return count.focus();
         if (t === qtyOf(id)) { toast('Count already matches'); return; }
-        try { const r = await write('count', { itemId: id, target: t }); toast(`${it.name} set to ${t}`, async () => { try { await write('undo', { logIds: r.logIds }, 'Undone'); } catch (er) { fail(er); } }); } catch (er) { fail(er); }
+        const prev = qtyOf(id); S.qty = new Map(S.qty).set(id, t); S.pending = (S.pending || 0) + 1; render(); toast(`${it.name} set to ${t}`);
+        try { const r = await send('count', { itemId: id, target: t }); toast(`${it.name} set to ${t}`, async () => { try { await write('undo', { logIds: r.logIds }, 'Undone'); } catch (er) { fail(er); } }); }
+        catch (er) { S.qty = new Map(S.qty).set(id, prev); fail(er); } finally { done(); }
       } }, el('div', { class: 'field' }, el('label', { for: 'count', text: 'Shelf count' }), count), el('div', { class: 'field', style: 'justify-content:flex-end' }, el('button', { class: 'btn', type: 'submit' }, 'Set count'))),
       !admin ? null : el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); save('updateItem', { id, reorder: Math.max(0, parseInt(reorder.value, 10) || 0) }, 'Saved'); } },
         el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'reorder', text: 'Reorder at' }), reorder), el('div', { class: 'field', style: 'justify-content:flex-end' }, el('button', { class: 'btn', type: 'submit' }, 'Save'))),
@@ -844,6 +872,12 @@ function viewMore() {
   ];
   v.append(el('div', { class: 'menu' }, items.map(([k, t, d]) => el('button', { type: 'button', class: 'row tap', onclick: () => { S.sub = k; render(); window.scrollTo(0, 0); } },
     el('div', { class: 'main' }, el('div', { class: 'name', text: t }), el('div', { class: 'sub', text: d })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })))));
+  const reloading = !!S.reloading;
+  v.append(el('div', { class: 'menu' }, el('button', { type: 'button', class: 'row tap', disabled: reloading || !!S.pending, onclick: async () => {
+      S.reloading = true; render(); await refresh(); S.reloading = false; render(); toast('Data refreshed'); } },
+    el('div', { class: 'main' }, el('div', { class: 'name', text: reloading ? 'Refreshing…' : 'Refresh data' }),
+      el('div', { class: 'sub', text: S.pending ? 'Waiting for saves to finish…' : `Last loaded ${S.loadedAt ? fmtTime(S.loadedAt) : '—'}. Use this to see changes other leaders made.` })),
+    el('span', { class: 'muted', 'aria-hidden': 'true', text: '↻' }))));
   v.append(el('div', { class: 'menu' },
     S.sheetUrl ? el('a', { class: 'row tap', href: S.sheetUrl, target: '_blank', rel: 'noopener', style: 'color:inherit;text-decoration:none' }, el('div', { class: 'main' }, el('div', { class: 'name', text: 'Open the Google Sheet' }), el('div', { class: 'sub', text: 'Admins only' })), el('span', { class: 'muted', text: '↗' })) : null,
     el('button', { type: 'button', class: 'row tap', onclick: signOut }, el('div', { class: 'main' }, el('div', { class: 'name', text: 'Sign out' }), el('div', { class: 'sub', text: S.me ? S.me.email : '' })))));
@@ -1037,8 +1071,7 @@ function paperLog(n) {
 }
 
 /* ---------- boot ---------- */
-setInterval(() => { if (S.token && document.visibilityState === 'visible' && !S.busy && !S.pending && !sheetFor) refresh(); }, 60000);
-document.addEventListener('visibilitychange', () => { if (S.token && document.visibilityState === 'visible') refresh(); });
+// Data loads when the app opens or someone signs in; More → Refresh data reloads it. No background reloading.
 
 (async function boot() {
   if (DEMO) {
