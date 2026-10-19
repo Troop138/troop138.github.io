@@ -26,7 +26,7 @@ items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge'
 
 // Checkbox columns hold FALSE on empty rows in a real sheet. Reproduce that so
 // appends land right under the data, not below the checkboxes.
-[['Leaders', 3], ['Items', 7], ['Scouts', 3]].forEach(([tab, col]) => {
+[['Leaders', 3], ['Items', 7], ['Scouts', 4]].forEach(([tab, col]) => {
   const s = env.ss.getSheetByName(tab);
   for (let r = s.data.length + 1; r <= 40; r++) s.set(r, col + 1, false);
 });

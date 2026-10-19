@@ -22,12 +22,11 @@
       const items = ss.getSheetByName('Items');
       STARTER_ITEMS.forEach(([n, c, rule, re], i) => {
         const cost = n === 'Merit badge sash' ? 24.99 : prices[c];
-        items.appendRow(['d' + i, n, c, cost, rule, re, re * 2, i === 1 ? 'TC-0001' : '', true]);
+        items.appendRow(['d' + i, n, c, cost, rule, re, re * 2, true]);
       });
-      set.getRange(5, 2).setValue(2);
       const scouts = ss.getSheetByName('Scouts');
       [['Sample Scout A', 'Panthers'], ['Sample Scout B', 'Panthers'], ['Sample Scout C', 'Hawks'], ['Sample Scout D', 'Hawks']]
-        .forEach(([n, p], i) => scouts.appendRow(['s' + i, n, p, true]));
+        .forEach(([n, p], i) => { const [f, ...l] = n.split(' '); scouts.appendRow(['s' + i, f, l.join(' '), p, true]); });
 
       // A little history so the reports have something to show.
       const tok = this.login('demo.admin@example.com');

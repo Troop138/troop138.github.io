@@ -19,7 +19,7 @@ const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
   items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Active'] },
-  scouts:   { name: 'Scouts',   headers: ['ID', 'Name', 'Patrol', 'Active', 'First name', 'Last name', 'Needs roster update', 'Added by', 'Added on'] },
+  scouts:   { name: 'Scouts',   headers: ['ID', 'First name', 'Last name', 'Patrol', 'Active', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost', 'Returns'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
@@ -192,7 +192,8 @@ function buildReportTabs_(ss) {
     `${items}!${L(ih, 'Cost')}2:${L(ih, 'Cost')}, ${items}!${L(ih, 'Reorder at')}2:${L(ih, 'Reorder at')}}, ` +
     `${iId}<>"", ${items}!${L(ih, 'Active')}2:${L(ih, 'Active')}<>FALSE), 2, TRUE, 1, TRUE), ""))`);
   s.getRange('F2').setFormula('=ARRAYFORMULA(IF(A2:A="",,C2:C*D2:D))');
-  s.getRange('G2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(C2:C<=0,"Out",IF(C2:C<=E2:E,"Low","OK"))))');
+  // Reorder at 0 = not kept in stock, so never Low/Out.
+  s.getRange('G2').setFormula('=ARRAYFORMULA(IF(A2:A="",,IF(E2:E<=0,IF(C2:C<=0,"Not stocked","OK"),IF(C2:C<=0,"Out",IF(C2:C<=E2:E,"Low","OK")))))');
   s.getRange('D:D').setNumberFormat('$#,##0.00'); s.getRange('F:F').setNumberFormat('$#,##0.00');
   s.setColumnWidth(1, 240); s.setColumnWidth(2, 200);
   s.setConditionalFormatRules([
@@ -376,7 +377,7 @@ function need_(me, roles) {
 function getData_(me) {
   const items = readTable_('items').filter(r => r['ID']).map(itemOut_);
   const scouts = readTable_('scouts').filter(r => r['ID']).map(r => ({
-    id: String(r['ID']), name: String(r['Name']), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
+    id: String(r['ID']), name: scoutName_(r), first: String(r['First name'] || ''), last: String(r['Last name'] || ''), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
     needsUpdate: r['Needs roster update'] === true || String(r['Needs roster update']).toUpperCase() === 'TRUE',
     addedBy: String(r['Added by'] || ''), addedAt: time_(r['Added on']),
   }));
@@ -453,7 +454,7 @@ function giveOne_(me, ctx, scout, itemId, qty, note, waiveReason) {
   const cost = Number(it['Cost']) || 0, rule = it['Charge rule'], now = ctx.now;
   const logId = id_();
   const row = { 'ID': logId, 'When': now, 'Item ID': itemId, 'Item': it['Name'], 'Change': -qty, 'Type': 'out',
-    'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Note': String(note || '').slice(0, 200), 'Logged by': me.email, 'Unit cost': cost };
+    'Scout ID': scout['ID'], 'Scout': scoutName_(scout), 'Note': String(note || '').slice(0, 200), 'Logged by': me.email, 'Unit cost': cost };
   let charged = 0;
   if (rule === 'Always charge') charged = qty;
   else if (rule === 'First one free') {
@@ -465,7 +466,7 @@ function giveOne_(me, ctx, scout, itemId, qty, note, waiveReason) {
   ctx.log.push(row); ctx.logRows.push(row);
   if (charged > 0 && cost > 0) {
     const waived = String(waiveReason || '').trim();
-    ctx.chargeRows.push({ 'ID': id_(), 'When': now, 'Scout ID': scout['ID'], 'Scout': scout['Name'], 'Item ID': itemId, 'Item': it['Name'],
+    ctx.chargeRows.push({ 'ID': id_(), 'When': now, 'Scout ID': scout['ID'], 'Scout': scoutName_(scout), 'Item ID': itemId, 'Item': it['Name'],
       'Qty': charged, 'Amount': round2_(charged * cost), 'Status': waived ? 'Waived' : 'Pending', 'Reason': waived.slice(0, 200),
       'Log ID': logId, 'Created by': me.email, 'Status changed': waived ? now : '', 'Status changed by': waived ? me.email : '' });
   }
@@ -557,12 +558,12 @@ function addScout_(me, a) {
   const first = String(a.first || '').trim().slice(0, 40), last = String(a.last || '').trim().slice(0, 40);
   if (!first || !last) throw apiError_('bad_request', "Enter the scout's first and last name.");
   const name = `${first} ${last}`;
-  const dup = readTable_('scouts').find(r => String(r['Name']).trim().toLowerCase() === name.toLowerCase());
+  const dup = readTable_('scouts').find(r => scoutName_(r).toLowerCase() === name.toLowerCase());
   if (dup) throw apiError_('conflict', dup['Active'] === false
     ? `${name} is already on the roster but archived. Ask the closet admin to restore them.`
     : `${name} is already on the roster.`);
   const flag = me.role !== 'Admin';
-  const row = { 'ID': id_(), 'Name': name, 'First name': first, 'Last name': last, 'Patrol': String(a.patrol || '').trim().slice(0, 60),
+  const row = { 'ID': id_(), 'First name': first, 'Last name': last, 'Patrol': String(a.patrol || '').trim().slice(0, 60),
     'Active': true, 'Needs roster update': flag, 'Added by': me.email, 'Added on': new Date() };
   appendRows_('scouts', [row]);
   if (flag) notifyAdmins_(`New scout added: ${name}`,
@@ -590,9 +591,7 @@ function updateScout_(me, a) {
   if ('first' in a || 'last' in a) {
     const first = String(a.first || '').trim().slice(0, 40), last = String(a.last || '').trim().slice(0, 40);
     if (!first || !last) throw apiError_('bad_request', "Enter the scout's first and last name.");
-    Object.assign(patch, { 'First name': first, 'Last name': last, 'Name': `${first} ${last}` });
-  } else if ('name' in a) {
-    const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', "Enter the scout's name."); patch['Name'] = n.slice(0, 80);
+    Object.assign(patch, { 'First name': first, 'Last name': last });
   }
   if ('patrol' in a) patch['Patrol'] = String(a.patrol).trim().slice(0, 60);
   if ('active' in a) patch['Active'] = !!a.active;
@@ -745,6 +744,8 @@ function deleteRows_(k, rowNums) {
 }
 
 function itemsById_() { const m = {}; readTable_('items').forEach(r => { if (r['ID']) m[String(r['ID'])] = r; }); return m; }
+/** Scouts have First name and Last name columns (older sheets had a single Name). */
+function scoutName_(r) { return `${String(r['First name'] || '').trim()} ${String(r['Last name'] || '').trim()}`.trim() || String(r['Name'] || '').trim(); }
 function scoutById_(id) { return readTable_('scouts').find(r => String(r['ID']) === String(id)); }
 
 function cleanLines_(lines) {

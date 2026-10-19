@@ -50,7 +50,8 @@ const isRole = (...r) => S.me && r.includes(S.me.role);
 const activeItems = () => [...S.items.values()].filter(i => i.active);
 const activeScouts = () => [...S.scouts.values()].filter(s => s.active).sort(byName);
 const qtyOf = id => S.qty.get(id) || 0;
-function status(it) { const q = qtyOf(it.id); if (q <= 0) return 'out'; if (it.reorder > 0 && q <= it.reorder) return 'low'; return 'ok'; }
+// Reorder at 0 = not kept in stock (bought when a scout needs one): never Low/Out.
+function status(it) { const q = qtyOf(it.id); if (!(it.reorder > 0)) return 'ok'; if (q <= 0) return 'out'; if (q <= it.reorder) return 'low'; return 'ok'; }
 function leaderName(email) { const l = S.leaders.find(x => x.email === email); return (l && l.name) || who(email); }
 
 const ICONS = {
@@ -827,7 +828,7 @@ function scoutSheet(id) {
   openSheet(() => {
     const s = S.scouts.get(id); if (!s) return null;
     const nameParts = s.name.split(/\s+/);
-    const first = el('input', { id: 'ffirst', value: nameParts[0] || '', autocomplete: 'off' }), last = el('input', { id: 'flast', value: nameParts.slice(1).join(' '), autocomplete: 'off' });
+    const first = el('input', { id: 'ffirst', value: s.first || nameParts[0] || '', autocomplete: 'off' }), last = el('input', { id: 'flast', value: s.last || nameParts.slice(1).join(' '), autocomplete: 'off' });
     const pp = patrolPicker(s.patrol);
     const recv = S.log.filter(l => l.scoutId === id && l.kind === 'out').sort((a, b) => b.at - a.at);
     const ch = S.charges.filter(c => c.scoutId === id), pend = ch.filter(c => c.status === 'Pending').reduce((a, c) => a + c.amount, 0);
