@@ -76,6 +76,7 @@ function toast(msg, undo) {
 function fail(e) { console.error(e); toast((e && e.message) || "Couldn't save. Check your connection and try again."); }
 
 /* ---------- API ---------- */
+let freshData = null; // the updated closet the server sends back with each change
 async function api(action, args) {
   let res;
   if (DEMO) {
@@ -92,25 +93,33 @@ async function api(action, args) {
     if (res.code === 'unauthorized' && action !== 'login') { signOutLocal(); showSignIn(res.error); }
     throw err;
   }
+  freshData = res.fresh || null;
   return res.data;
 }
 
-async function refresh() {
-  try {
-    const d = await api('getData');
+function applyData(d) {
     S.me = d.me; S.settings = d.settings; S.sheetUrl = d.sheetUrl || '';
     S.items = new Map(d.items.map(i => [i.id, i]));
     S.scouts = new Map(d.scouts.map(s => [s.id, s]));
     S.log = d.log; S.charges = d.charges; S.leaders = d.leaders || [];
     S.returned = new Set(S.log.filter(l => l.kind === 'return' && l.returns).map(l => l.returns));
     const m = new Map(); for (const l of S.log) m.set(l.itemId, (m.get(l.itemId) || 0) + l.delta); S.qty = m;
-    S.error = '';
-  } catch (e) { if (e.code !== 'unauthorized') S.error = e.message; else return; }
+    S.error = ''; S.ready = true;
+}
+async function refresh() {
+  try { applyData(await api('getData')); }
+  catch (e) { if (e.code !== 'unauthorized') S.error = e.message; else return; }
   S.ready = true; soon();
+}
+/** Send a change; the reply carries the updated closet, so one round trip is enough. */
+async function send(action, args) {
+  const r = await api(action, args);
+  if (freshData) { applyData(freshData); freshData = null; } else await refresh();
+  return r;
 }
 async function write(action, args, msg) {
   S.busy = true; render();
-  try { const r = await api(action, args); await refresh(); if (msg) toast(msg); return r; }
+  try { const r = await send(action, args); if (msg) toast(msg); return r; }
   finally { S.busy = false; soon(); }
 }
 
@@ -400,12 +409,20 @@ function viewGive() {
     if (c.missingReason) { toast('Add a reason for each item you are not charging.'); return; }
     const n = cartCount(g.cart);
     const lines = Object.entries(g.cart).map(([itemId, l]) => ({ itemId, qty: l.n, waiveReason: l.waive !== null ? (l.waive.trim() || 'No reason given') : '' }));
+    // Clear the screen right away and save in the background; put the cart back if the save fails.
+    const cart = g.cart, scoutId = g.scoutId;
+    lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) - l.qty));
+    g.cart = {}; g.scoutId = null; S.scoutQ = ''; S.q = ''; S.pending = (S.pending || 0) + 1; renderToolbar(); render(); window.scrollTo(0, 0);
+    toast(`Saving ${n} item${n > 1 ? 's' : ''} for ${s.name}…`);
     try {
-      const r = await write('give', { scoutId: g.scoutId, lines });
+      const r = await send('give', { scoutId, lines });
       const undo = async () => { try { await write('undo', { logIds: r.logIds }, 'Undone'); } catch (e) { fail(e); } };
       toast(`Logged ${n} item${n > 1 ? 's' : ''} to ${s.name}` + (r.charged ? ` · ${money(r.charged)} charge` : ''), undo);
-      g.cart = {}; g.scoutId = null; S.scoutQ = ''; S.q = ''; renderToolbar(); render(); window.scrollTo(0, 0);
-    } catch (e) { fail(e); }
+    } catch (e) {
+      lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) + l.qty));
+      if (!g.scoutId && !cartCount(g.cart)) { g.scoutId = scoutId; g.cart = cart; renderToolbar(); }
+      toast(`Not saved: ${(e && e.message) || "couldn't reach the closet"} Your items are still in the cart.`);
+    } finally { S.pending--; soon(); }
   };
   summaryHook = () => {
     const n = cartCount(g.cart), c = cartCharges(g.cart, g.scoutId);
@@ -996,7 +1013,7 @@ function paperLog(n) {
 }
 
 /* ---------- boot ---------- */
-setInterval(() => { if (S.token && document.visibilityState === 'visible' && !S.busy && !sheetFor) refresh(); }, 60000);
+setInterval(() => { if (S.token && document.visibilityState === 'visible' && !S.busy && !S.pending && !sheetFor) refresh(); }, 60000);
 document.addEventListener('visibilitychange', () => { if (S.token && document.visibilityState === 'visible') refresh(); });
 
 (async function boot() {

@@ -282,7 +282,11 @@ function doPost(e) {
     const me = sessionUser_(req.token);
     const fn = ACTIONS[action];
     if (!fn) throw apiError_('bad_request', 'Unknown action.');
-    return json_({ ok: true, data: fn(me, req.args || {}) });
+    const data = fn(me, req.args || {});
+    const out = { ok: true, data };
+    // Send the updated closet back with every change, so the page doesn't need a second round trip.
+    if (action !== 'getData' && action !== 'logout') { try { out.fresh = getData_(sessionUser_(req.token)); } catch (e) { /* page will reload on its own */ } }
+    return json_(out);
   } catch (err) {
     if (err && err.code) return json_({ ok: false, code: err.code, error: err.message });
     console.error(err && err.stack || err);
