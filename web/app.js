@@ -861,12 +861,13 @@ function viewMore() {
   const sub = S.sub;
   if (sub) {
     v.append(el('div', { style: 'margin-top:12px' }, el('button', { class: 'btn small', type: 'button', onclick: () => { S.sub = ''; render(); } }, '‹ More')));
-    ({ scouts: viewScouts, history: viewHistory, admin: viewAdmin, share: viewShare, paper: viewPaper })[sub](v);
+    ({ scouts: viewScouts, history: viewHistory, admin: viewAdmin, share: viewShare, paper: viewPaper, countsheet: viewCountSheet })[sub](v);
     return;
   }
   const items = [
     ['history', 'History', 'Recent entries, and undo your own'],
     ['paper', 'Print paper log', 'For leaders who would rather write it down'],
+    ['countsheet', 'Print count sheet', 'Every item with a box to write the shelf count'],
     ['share', 'Share the app', 'QR code and link for other leaders'],
     ...(isRole('Admin') ? [['admin', 'Leaders & access', 'Who can sign in, and their roles']] : []),
   ];
@@ -1056,9 +1057,40 @@ function viewPaper(v) {
       el('div', { class: 'field' }, el('label', { for: 'pages', text: 'Pages' }), pages),
       el('button', { class: 'btn primary', type: 'button', onclick: () => printNode(paperLog(Math.max(1, Math.min(20, parseInt(pages.value, 10) || 1))), '@page{size:letter portrait;margin:0.4in}') }, 'Print')));
 }
+/* ---------- count sheet (for taking inventory) ---------- */
+function viewCountSheet(v) {
+  const show = el('input', { id: 'csshow', type: 'checkbox', class: 'check' }); show.checked = S.csShow !== false;
+  show.onchange = () => { S.csShow = show.checked; };
+  v.append(el('h2', { style: 'margin-top:12px', text: 'Count sheet' }),
+    el('div', { class: 'card stack', style: 'margin-top:12px' },
+      el('p', { style: 'margin:0', text: `Every item (${activeItems().length}) grouped by category, with a box to write what's on the shelf. When you're done, enter the counts with Shelf count on each item, or send a photo of the pages to whoever enters them.` }),
+      el('label', { class: 'row', for: 'csshow', style: 'min-height:44px' }, show, el('div', { class: 'main' }, el('div', { class: 'name', text: "Show the app's current count" }), el('div', { class: 'sub', text: 'Leave off for a blind count.' }))),
+      el('button', { class: 'btn primary', type: 'button', onclick: () => printNode(countSheet(S.csShow !== false), '@page{size:letter portrait;margin:0.4in}') }, 'Print')));
+}
+function countSheet(showApp) {
+  const f = 'system-ui,sans-serif', root = el('div', { style: 'color:#000;font:8.2pt ' + f });
+  root.append(el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:6px' },
+    el('div', { style: 'font:700 16pt ' + f, text: [S.settings.troopName, 'Inventory count'].filter(Boolean).join(' · ') }),
+    el('div', { style: 'font:10pt ' + f, text: 'Counted by ____________   Date ________' })),
+    el('div', { style: 'margin-bottom:8px', text: (showApp ? '"App" is what the app thinks is on the shelf. ' : '') + 'Write the number you count in the box (0 if none). Found something not listed? Add it at the end.' }));
+  const cols = el('div', { style: 'column-count:3;column-gap:0.16in;width:calc(100% - 3px)' });
+  const line = (name, app) => el('div', { style: 'display:flex;align-items:flex-end;gap:3px;height:0.235in;border-bottom:1px dotted #999;break-inside:avoid' },
+    el('span', { style: 'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis', text: name }),
+    showApp ? el('span', { style: 'flex:none;width:0.2in;text-align:right;color:#555;font-size:8pt', text: app }) : null,
+    el('span', { style: 'flex:none;box-sizing:border-box;width:0.4in;height:0.19in;border:1px solid #000;background:#fff' }));
+  for (const [c, g] of grouped(activeItems())) {
+    cols.append(el('div', { style: 'break-inside:avoid;break-after:avoid;margin:7px 0 2px;display:flex;justify-content:space-between;font:700 9.5pt ' + f + ';border-bottom:1px solid #000' },
+      el('span', { text: CAT_SHORT[c] }), el('span', { style: 'font-weight:400;font-size:7.5pt;white-space:pre', text: showApp ? 'App   Count' : 'Count' })));
+    g.forEach(it => cols.append(line(it.name + (it.eagleReq ? ' *' : ''), String(qtyOf(it.id)))));
+  }
+  cols.append(el('div', { style: 'break-inside:avoid;margin:8px 0 2px;font:700 10pt ' + f + ';border-bottom:1px solid #000', text: 'Other items found' }));
+  for (let i = 0; i < 8; i++) cols.append(line('', ''));
+  root.append(cols, el('div', { style: 'margin-top:8px;font-size:8pt;color:#555', text: '* Eagle-required merit badge. Printed ' + new Date().toLocaleDateString() }));
+  return root;
+}
 function paperLog(n) {
   const cols = [['Date', '11%'], ['Scout (first and last name)', '28%'], ['Item', '33%'], ['Qty', '7%'], ['Leader', '13%'], ['Recorded', '8%']];
-  const cell = 'border:1px solid #000;padding:0 6px;height:0.36in;font:10pt system-ui,sans-serif;text-align:left';
+  const cell = 'border:1px solid #000;padding:0 6px;height:0.33in;font:10pt system-ui,sans-serif;text-align:left';
   const page = () => el('div', { style: 'break-after:page;color:#000' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px' },
       el('div', { style: 'font:700 18pt system-ui,sans-serif', text: [S.settings.troopName, 'Advancement closet log'].filter(Boolean).join(' · ') })),
@@ -1066,7 +1098,7 @@ function paperLog(n) {
     el('table', { style: 'border-collapse:collapse;width:calc(100% - 2px);table-layout:fixed' },
       el('colgroup', {}, cols.map(([, w]) => el('col', { style: 'width:' + w }))),
       el('thead', {}, el('tr', {}, cols.map(([t]) => el('th', { style: cell + ';background:#eee;font-weight:700;height:0.3in' + (t === 'Recorded' ? ';font-size:8pt;padding:0 3px;text-align:center' : ''), text: t })))),
-      el('tbody', {}, Array.from({ length: 23 }, (_, i) => el('tr', {}, cols.map(() => el('td', { style: cell + (i % 2 ? ';background:#f6f6f6' : '') })))))));
+      el('tbody', {}, Array.from({ length: 26 }, (_, i) => el('tr', {}, cols.map(() => el('td', { style: cell + (i % 2 ? ';background:#f6f6f6' : '') })))))));
   return el('div', {}, Array.from({ length: n }, page));
 }
 
