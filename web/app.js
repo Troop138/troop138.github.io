@@ -876,7 +876,7 @@ function viewMore() {
   v.append(el('div', { class: 'menu' }, el('button', { type: 'button', class: 'row tap', disabled: reloading || !!S.pending, onclick: async () => {
       S.reloading = true; render(); await refresh(); S.reloading = false; render(); toast('Data refreshed'); } },
     el('div', { class: 'main' }, el('div', { class: 'name', text: reloading ? 'Refreshing…' : 'Refresh data' }),
-      el('div', { class: 'sub', text: S.pending ? 'Waiting for saves to finish…' : `Last loaded ${S.loadedAt ? fmtTime(S.loadedAt) : '—'}. Use this to see changes other leaders made.` })),
+      el('div', { class: 'sub', text: S.pending ? 'Waiting for saves to finish…' : `Last loaded ${S.loadedAt ? fmtTime(S.loadedAt) : '—'}. Reloads on its own every 5 minutes; tap to see other leaders' changes now.` })),
     el('span', { class: 'muted', 'aria-hidden': 'true', text: '↻' }))));
   v.append(el('div', { class: 'menu' },
     S.sheetUrl ? el('a', { class: 'row tap', href: S.sheetUrl, target: '_blank', rel: 'noopener', style: 'color:inherit;text-decoration:none' }, el('div', { class: 'main' }, el('div', { class: 'name', text: 'Open the Google Sheet' }), el('div', { class: 'sub', text: 'Admins only' })), el('span', { class: 'muted', text: '↗' })) : null,
@@ -1071,7 +1071,9 @@ function paperLog(n) {
 }
 
 /* ---------- boot ---------- */
-// Data loads when the app opens or someone signs in; More → Refresh data reloads it. No background reloading.
+// Data loads when the app opens or someone signs in, then quietly every 5 minutes while the app is on screen
+// (skipped while something is saving or a panel is open). More → Refresh data reloads it right away.
+setInterval(() => { if (S.token && S.ready && document.visibilityState === 'visible' && !S.busy && !S.pending && !S.reloading && !sheetFor) refresh(); }, 5 * 60 * 1000);
 
 (async function boot() {
   if (DEMO) {
