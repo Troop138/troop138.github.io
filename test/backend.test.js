@@ -147,7 +147,8 @@ test('leaders cannot post charges or edit costs', () => {
   const c = ok(api(admin, 'getData')).charges.find(x => x.status === 'Pending');
   assert.strictEqual(api(lee, 'setChargeStatus', { ids: [c.id], status: 'Transferred to Treasurer' }).code, 'forbidden');
   assert.strictEqual(api(lee, 'updateItem', { id: 'i1', cost: 0 }).code, 'forbidden');
-  ok(api(lee, 'updateItem', { id: 'i1', reorder: 4 }));
+  assert.strictEqual(api(lee, 'updateItem', { id: 'i1', reorder: 4 }).code, 'forbidden', 'leaders cannot change reorder levels');
+  ok(api(admin, 'updateItem', { id: 'i1', reorder: 4 }));
 });
 test('treasurer marks charges transferred', () => {
   const pending = ok(api(admin, 'getData')).charges.filter(x => x.status === 'Pending');

@@ -530,7 +530,7 @@ function itemSheet(id) {
         if (t === qtyOf(id)) { toast('Count already matches'); return; }
         try { const r = await write('count', { itemId: id, target: t }); toast(`${it.name} set to ${t}`, async () => { try { await write('undo', { logIds: r.logIds }, 'Undone'); } catch (er) { fail(er); } }); } catch (er) { fail(er); }
       } }, el('div', { class: 'field' }, el('label', { for: 'count', text: 'Shelf count' }), count), el('div', { class: 'field', style: 'justify-content:flex-end' }, el('button', { class: 'btn', type: 'submit' }, 'Set count'))),
-      el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); save('updateItem', { id, reorder: Math.max(0, parseInt(reorder.value, 10) || 0) }, 'Saved'); } },
+      !admin ? null : el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); save('updateItem', { id, reorder: Math.max(0, parseInt(reorder.value, 10) || 0) }, 'Saved'); } },
         el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'reorder', text: 'Reorder at' }), reorder), el('div', { class: 'field', style: 'justify-content:flex-end' }, el('button', { class: 'btn', type: 'submit' }, 'Save'))),
         el('p', { class: 'mini muted', style: 'margin:0', text: 'Shows as Low at or below this number. 0 = not kept in stock: never shows Low or Out.' })),
       admin ? editForm() : null,

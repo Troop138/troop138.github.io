@@ -621,9 +621,7 @@ function addItem_(me, a) {
 function updateItem_(me, a) {
   const it = itemsById_()[String(a.id)];
   if (!it) throw apiError_('bad_request', 'That item no longer exists.');
-  const leaderFields = ['reorder'];
-  const touched = Object.keys(a).filter(k => k !== 'id');
-  if (touched.some(k => leaderFields.indexOf(k) < 0)) need_(me, ['Admin']);
+  need_(me, ['Admin']); // only admins change items, including reorder levels
   const patch = itemPatch_(a, false);
   if ('name' in a) { const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', 'Give the item a name.'); patch['Name'] = titleCase_(n).slice(0, 100); }
   if ('active' in a) patch['Active'] = !!a.active;
