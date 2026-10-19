@@ -650,6 +650,13 @@ function tableEl(t) {
       : el('tr', {}, el('td', { colspan: t.cols.length, class: 'muted', text: 'Nothing to show.' }))),
     t.total ? el('tfoot', {}, el('tr', { class: 'total' }, t.total.map((c, i) => el('td', { class: isNum(i) ? 'num' : '', text: c == null ? '' : String(c) })))) : null);
 }
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: name, style: 'display:none' });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); }
 function downloadCSV(name, t) {
   const esc = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const lines = [t.cols, ...t.rows, ...(t.total ? [t.total] : [])].map(r => r.map(esc).join(','));
