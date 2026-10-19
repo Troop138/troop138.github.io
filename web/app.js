@@ -973,7 +973,7 @@ function paperLog(n) {
   const page = () => el('div', { style: 'break-after:page;color:#000' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px' },
       el('div', { style: 'font:700 18pt system-ui,sans-serif', text: [S.settings.troopName, 'Advancement closet log'].filter(Boolean).join(' · ') })),
-    el('div', { style: 'font:10pt system-ui,sans-serif;margin-bottom:6px', text: 'Write clearly, one item per line. Putting something back on the shelf? Write RETURN before the item name, e.g. "RETURN Cooking". Leave Recorded blank; it gets ticked once entered in the app.' }),
+    el('div', { style: 'font:10pt system-ui,sans-serif;margin-bottom:6px', text: 'Write clearly, one item per line. Putting something back on the shelf? Write RETURN before the item name, e.g. "RETURN Cooking". Leave Recorded blank; it gets ticked once the advancement team records it in the inventory system.' }),
     el('table', { style: 'border-collapse:collapse;width:calc(100% - 2px);table-layout:fixed' },
       el('colgroup', {}, cols.map(([, w]) => el('col', { style: 'width:' + w }))),
       el('thead', {}, el('tr', {}, cols.map(([t]) => el('th', { style: cell + ';background:#eee;font-weight:700;height:0.3in' + (t === 'Recorded' ? ';font-size:8pt;padding:0 3px;text-align:center' : ''), text: t })))),
