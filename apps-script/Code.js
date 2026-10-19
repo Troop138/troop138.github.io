@@ -56,7 +56,6 @@ const STARTER_ITEMS = [
     .map(n => [n, 'Merit badge', 'First one free', 1]),
   ["Totin' Chip card", 'Award & card', 'First one free', 5],
   ["Firem'n Chit card", 'Award & card', 'First one free', 5],
-  ['Rank wallet card', 'Award & card', 'Free', 5],
   ['Merit badge sash', 'Award & card', 'Always charge', 2],
 ];
 
