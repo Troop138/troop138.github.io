@@ -963,22 +963,22 @@ function viewPaper(v) {
   const pages = el('input', { id: 'pages', type: 'number', min: '1', max: '20', value: '1', inputmode: 'numeric', style: 'max-width:120px' });
   v.append(el('h2', { style: 'margin-top:12px', text: 'Paper log' }),
     el('div', { class: 'card stack', style: 'margin-top:12px' },
-      el('p', { style: 'margin:0', text: 'A sheet to keep in the closet for anyone who would rather not use the app. One item per line, circling OUT or BACK. Snap a photo of filled-in pages and send it to whoever enters them.' }),
+      el('p', { style: 'margin:0', text: 'A sheet to keep in the closet for anyone who would rather not use the app. One item per line; RETURN before the item name for anything put back. Snap a photo of filled-in pages and send it to whoever enters them.' }),
       el('div', { class: 'field' }, el('label', { for: 'pages', text: 'Pages' }), pages),
       el('button', { class: 'btn primary', type: 'button', onclick: () => printNode(paperLog(Math.max(1, Math.min(20, parseInt(pages.value, 10) || 1))), '@page{size:letter landscape;margin:0.4in}') }, 'Print')));
 }
 function paperLog(n) {
-  const cols = [['Date', '9%'], ['Scout (first and last name)', '26%'], ['Item (badge, rank or card)', '31%'], ['Qty', '6%'], ['Circle one', '12%'], ['Leader', '16%']];
+  const cols = [['Date', '10%'], ['Scout (first and last name)', '28%'], ['Item (badge, rank or card)', '38%'], ['Qty', '7%'], ['Leader', '17%']];
   const cell = 'border:1px solid #000;padding:0 6px;height:0.36in;font:10pt system-ui,sans-serif;text-align:left';
   const page = () => el('div', { style: 'break-after:page;color:#000' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px' },
       el('div', { style: 'font:700 18pt system-ui,sans-serif', text: [S.settings.troopName, 'Advancement closet log'].filter(Boolean).join(' · ') }),
       el('div', { style: 'font:10pt system-ui,sans-serif', text: 'Page ____  Entered in app: ☐' })),
-    el('div', { style: 'font:10pt system-ui,sans-serif;margin-bottom:6px', text: 'Write clearly, one item per line. Circle OUT when giving to a scout, BACK when it goes back on the shelf.' }),
+    el('div', { style: 'font:10pt system-ui,sans-serif;margin-bottom:6px', text: 'Write clearly, one item per line. Putting something back on the shelf? Write RETURN before the item name, e.g. "RETURN Cooking".' }),
     el('table', { style: 'border-collapse:collapse;width:calc(100% - 2px);table-layout:fixed' },
       el('colgroup', {}, cols.map(([, w]) => el('col', { style: 'width:' + w }))),
       el('thead', {}, el('tr', {}, cols.map(([t]) => el('th', { style: cell + ';background:#eee;font-weight:700;height:0.3in', text: t })))),
-      el('tbody', {}, Array.from({ length: 18 }, (_, i) => el('tr', {}, cols.map(([t]) => el('td', { style: cell + (i % 2 ? ';background:#f6f6f6' : '') + (t === 'Circle one' ? ';text-align:center;font-weight:600;letter-spacing:.04em;word-spacing:1.2em;white-space:nowrap' : ''), text: t === 'Circle one' ? 'OUT BACK' : '' })))))));
+      el('tbody', {}, Array.from({ length: 18 }, (_, i) => el('tr', {}, cols.map(() => el('td', { style: cell + (i % 2 ? ';background:#f6f6f6' : '') })))))));
   return el('div', {}, Array.from({ length: n }, page));
 }
 

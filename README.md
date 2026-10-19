@@ -26,7 +26,7 @@ HANDOFF.md      how to hand the closet to the next person
 
 - **Give out:** pick a scout, tap + on each item, confirm. Charges follow each item's charge rule. A leader can mark a charge "No charge" with a reason.
 - **Restock:** tap + on what you're putting away, with an optional note like "Scout Shop order".
-- **Paper log:** More → Print paper log. Leaders who don't use the app write one item per line with a quantity and circle OUT or BACK; a photo of the page gets entered later.
+- **Paper log:** More → Print paper log. Leaders who don't use the app write one item per line with a quantity (RETURN before the item name for anything put back on the shelf); a photo of the page gets entered later.
 - **Reports:** current inventory with shelf value, reorder list, activity by date range, scout history, charges, and shelf-count fixes. Each downloads as CSV or prints.
 
 Roles, set on the **Leaders** tab:
