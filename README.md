@@ -131,7 +131,7 @@ The app reads columns by header name, so you can reorder columns, but don't rena
 
 | Tab | Safe to edit | Leave alone |
 |---|---|---|
-| Items | Name, Category, Cost, Charge rule, Reorder at, Stock to, Active | ID |
+| Items | Name, Category, Cost, Charge rule, Reorder at, Active, Eagle required | ID |
 | Scouts | First name, Last name, Active | ID |
 | Leaders | Everything (this is how you manage access) | |
 | Charges | Status (dropdown). The date and who changed it are filled in automatically. | ID, Amount |

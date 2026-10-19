@@ -494,7 +494,6 @@ function itemSheet(id) {
     const it = S.items.get(id); if (!it) return null;
     const q = qtyOf(id), admin = isRole('Admin');
     const reorder = el('input', { id: 'reorder', type: 'number', inputmode: 'numeric', min: '0', value: String(it.reorder || 0) });
-    const stockTo = el('input', { id: 'stockto', type: 'number', inputmode: 'numeric', min: '0', value: String(it.stockTo || 0) });
     const count = el('input', { id: 'count', type: 'number', inputmode: 'numeric', min: '0', placeholder: String(q) });
     const recent = S.log.filter(l => l.itemId === id).sort((a, b) => b.at - a.at).slice(0, 8);
 
@@ -531,9 +530,9 @@ function itemSheet(id) {
         if (t === qtyOf(id)) { toast('Count already matches'); return; }
         try { const r = await write('count', { itemId: id, target: t }); toast(`${it.name} set to ${t}`, async () => { try { await write('undo', { logIds: r.logIds }, 'Undone'); } catch (er) { fail(er); } }); } catch (er) { fail(er); }
       } }, el('div', { class: 'field' }, el('label', { for: 'count', text: 'Shelf count' }), count), el('div', { class: 'field', style: 'justify-content:flex-end' }, el('button', { class: 'btn', type: 'submit' }, 'Set count'))),
-      el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); save('updateItem', { id, reorder: Math.max(0, parseInt(reorder.value, 10) || 0), stockTo: Math.max(0, parseInt(stockTo.value, 10) || 0) }, 'Saved'); } },
-        el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'reorder', text: 'Reorder at' }), reorder), el('div', { class: 'field' }, el('label', { for: 'stockto', text: 'Stock up to' }), stockTo)),
-        el('button', { class: 'btn small', type: 'submit' }, 'Save reorder levels')),
+      el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); save('updateItem', { id, reorder: Math.max(0, parseInt(reorder.value, 10) || 0) }, 'Saved'); } },
+        el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'reorder', text: 'Reorder at' }), reorder), el('div', { class: 'field', style: 'justify-content:flex-end' }, el('button', { class: 'btn', type: 'submit' }, 'Save'))),
+        el('p', { class: 'mini muted', style: 'margin:0', text: 'Shows as Low at or below this number. 0 = not kept in stock: never shows Low or Out.' })),
       admin ? editForm() : null,
       el('div', {}, el('h3', { text: 'Recent activity' }), recent.length ? recent.map(l => {
         const sc = l.scoutId && S.scouts.get(l.scoutId);
@@ -554,7 +553,7 @@ function itemForm() {
     const start = el('input', { id: 'istart', type: 'number', inputmode: 'numeric', min: '0', value: '0' });
     return el('form', { style: 'display:contents', onsubmit: e => {
       e.preventDefault(); const nm = name.value.trim(); if (!nm) return name.focus();
-      save('addItem', { name: nm, cat: cat.value, cost: Number(cost.value) || 0, rule: rule.value, reorder: parseInt(re.value, 10) || 0, stockTo: (parseInt(re.value, 10) || 0) * 2, startQty: parseInt(start.value, 10) || 0 }, `Added ${nm}`, closeSheet);
+      save('addItem', { name: nm, cat: cat.value, cost: Number(cost.value) || 0, rule: rule.value, reorder: parseInt(re.value, 10) || 0, startQty: parseInt(start.value, 10) || 0 }, `Added ${nm}`, closeSheet);
     } },
       sheetHead('Add item'),
       el('div', { class: 'field' }, el('label', { for: 'iname', text: 'Name' }), name),
@@ -640,12 +639,14 @@ function repInventory() {
 }
 function repReorder() {
   const items = activeItems().filter(i => status(i) !== 'ok').sort(byName);
-  const rows = items.map(i => { const q = qtyOf(i.id), target = i.stockTo || i.reorder * 2 || 1, need = Math.max(target - q, 0); return [i.name, i.cat, q, i.reorder, target, need, money(need * i.cost)]; });
-  const units = rows.reduce((s, r) => s + r[5], 0), cost = items.reduce((s, i) => { const t = i.stockTo || i.reorder * 2 || 1; return s + Math.max(t - qtyOf(i.id), 0) * i.cost; }, 0);
+  // Suggest buying enough to get back to twice the reorder level.
+  const target = i => i.reorder * 2;
+  const rows = items.map(i => { const q = qtyOf(i.id), need = Math.max(target(i) - q, 0); return [i.name, i.cat, q, i.reorder, need, money(need * i.cost)]; });
+  const units = rows.reduce((s, r) => s + r[4], 0), cost = items.reduce((s, i) => s + Math.max(target(i) - qtyOf(i.id), 0) * i.cost, 0);
   return {
     subtitle: 'Items at or below their reorder level',
     kpis: [['Items to buy', items.length], ['Units', units], ['Estimated cost', money(cost)]],
-    table: { cols: ['Item', 'Category', 'On hand', 'Reorder at', 'Stock up to', 'Buy', 'Est. cost'], num: [2, 3, 4, 5, 6], rows, total: ['Total', '', '', '', '', units, money(cost)] },
+    table: { cols: ['Item', 'Category', 'On hand', 'Reorder at', 'Buy', 'Est. cost'], num: [2, 3, 4, 5], rows, total: ['Total', '', '', '', units, money(cost)] },
   };
 }
 function rangeBounds() {

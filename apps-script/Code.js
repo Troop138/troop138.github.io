@@ -18,7 +18,7 @@
 const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
-  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Active', 'Eagle required'] },
+  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Active', 'Eagle required'] },
   scouts:   { name: 'Scouts',   headers: ['ID', 'First name', 'Last name', 'Active', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost', 'Returns'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
@@ -85,7 +85,7 @@ function setup() {
   // Starter item list at zero on hand.
   const items = sheet_('items');
   if (lastDataRow_(items) < 2) {
-    const rows = STARTER_ITEMS.map(([n, c, rule, re, eagle]) => [id_(), n, c, 0, rule, re, re * 2, true, !!eagle]);
+    const rows = STARTER_ITEMS.map(([n, c, rule, re, eagle]) => [id_(), n, c, 0, rule, re, true, !!eagle]);
     items.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
 
@@ -412,7 +412,7 @@ function itemOut_(r) {
     cat: ({ 'Eagle-required merit badge': 'Merit badge', 'Uniform & patches': 'Uniform', 'Position patch': 'Position' })[r['Category']] || String(r['Category'] || 'Other'),
     eagleReq: r['Eagle required'] === true || String(r['Eagle required']).toUpperCase() === 'TRUE' || r['Category'] === 'Eagle-required merit badge',
     cost: Number(r['Cost']) || 0, rule: CHARGE_RULES.indexOf(r['Charge rule']) >= 0 ? r['Charge rule'] : 'Free',
-    reorder: Number(r['Reorder at']) || 0, stockTo: Number(r['Stock to']) || 0,
+    reorder: Number(r['Reorder at']) || 0,
     active: r['Active'] !== false,
   };
 }
@@ -621,7 +621,7 @@ function addItem_(me, a) {
 function updateItem_(me, a) {
   const it = itemsById_()[String(a.id)];
   if (!it) throw apiError_('bad_request', 'That item no longer exists.');
-  const leaderFields = ['reorder', 'stockTo'];
+  const leaderFields = ['reorder'];
   const touched = Object.keys(a).filter(k => k !== 'id');
   if (touched.some(k => leaderFields.indexOf(k) < 0)) need_(me, ['Admin']);
   const patch = itemPatch_(a, false);
@@ -637,7 +637,6 @@ function itemPatch_(a, withDefaults) {
   if ('cost' in a || withDefaults) p['Cost'] = Math.max(0, round2_(Number(a.cost) || 0));
   if ('rule' in a || withDefaults) p['Charge rule'] = CHARGE_RULES.indexOf(a.rule) >= 0 ? a.rule : 'Free';
   if ('reorder' in a || withDefaults) p['Reorder at'] = Math.max(0, Math.trunc(Number(a.reorder) || 0));
-  if ('stockTo' in a || withDefaults) p['Stock to'] = Math.max(0, Math.trunc(Number(a.stockTo) || 0));
   if ('eagleReq' in a || withDefaults) p['Eagle required'] = !!a.eagleReq;
   return p;
 }

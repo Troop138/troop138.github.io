@@ -20,13 +20,13 @@ env.ss.getSheetByName('Leaders').appendRow(['admin@example.com', 'Ada', 'Admin',
 env.ss.getSheetByName('Leaders').appendRow(['lee@example.com', 'Lee', 'Leader', true]);
 env.ss.getSheetByName('Leaders').appendRow(['tess@example.com', 'Tess', 'Treasurer', true]);
 const items = env.ss.getSheetByName('Items');
-items.appendRow(['i1', 'Tenderfoot', 'Rank', 1.5, 'Free', 3, 6, true]);
-items.appendRow(['i2', "Totin' Chip", 'Award & card', 1, 'First one free', 5, 10, true]);
-items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge', 2, 4, true]);
+items.appendRow(['i1', 'Tenderfoot', 'Rank', 1.5, 'Free', 3, true]);
+items.appendRow(['i2', "Totin' Chip", 'Award & card', 1, 'First one free', 5, true]);
+items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge', 2, true]);
 
 // Checkbox columns hold FALSE on empty rows in a real sheet. Reproduce that so
 // appends land right under the data, not below the checkboxes.
-[['Leaders', 3], ['Items', 7], ['Scouts', 3]].forEach(([tab, col]) => {
+[['Leaders', 3], ['Items', 6], ['Scouts', 3]].forEach(([tab, col]) => {
   const s = env.ss.getSheetByName(tab);
   for (let r = s.data.length + 1; r <= 40; r++) s.set(r, col + 1, false);
 });

@@ -22,7 +22,7 @@
       const items = ss.getSheetByName('Items');
       STARTER_ITEMS.forEach(([n, c, rule, re, eagle], i) => {
         const cost = n === 'Merit badge sash' ? 16.99 : prices[c];
-        items.appendRow(['d' + i, n, c, cost, rule, re, re * 2, true, !!eagle]);
+        items.appendRow(['d' + i, n, c, cost, rule, re, true, !!eagle]);
       });
       const scouts = ss.getSheetByName('Scouts');
       [['Sample Scout A', 'Panthers'], ['Sample Scout B', 'Panthers'], ['Sample Scout C', 'Hawks'], ['Sample Scout D', 'Hawks']]
