@@ -122,7 +122,7 @@ function showSignIn(message) {
   const app = $('#app'); app.replaceChildren();
   const err = el('div', { class: 'err', text: message || '' });
   const card = el('div', { class: 'card' },
-    el('img', { class: 'mark', src: 'icons/icon.svg', alt: '' }),
+    el('img', { class: 'mark', src: 'icons/icon-192.png', alt: '' }),
     el('h1', { text: 'Troop Closet' }),
     el('p', { class: 'muted', style: 'margin:0', text: 'Advancement inventory for troop leaders.' }));
   if (DEMO) {
