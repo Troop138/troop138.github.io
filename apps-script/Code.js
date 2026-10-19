@@ -24,7 +24,7 @@ const TABS = {
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
 
-const CATEGORIES = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Award & card', 'Eagle', 'Other'];
+const CATEGORIES = ['Rank', 'Merit badge', 'Uniform', 'Position', 'Rank pin', 'Award & card', 'Eagle', 'Other'];
 const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 // Pending: owed. Transferred to Treasurer: sent to the treasurer to collect. Waived: not charged (with a reason).
@@ -54,8 +54,8 @@ const STARTER_ITEMS = [
     'Search and Rescue', 'Shotgun Shooting', 'Space Exploration', 'Weather', 'Wilderness Survival',
     'Wood Carving', 'Woodwork']
     .map(n => [n, 'Merit badge', 'First one free', 1]),
-  ["Totin' Chip card", 'Award & card', 'First one free', 5],
-  ["Firem'n Chit card", 'Award & card', 'First one free', 5],
+  ["Totin' Chip", 'Award & card', 'First one free', 5],
+  ["Firem'n Chit", 'Award & card', 'First one free', 5],
   ['Merit badge sash', 'Award & card', 'First one free', 2],
 ];
 
@@ -409,7 +409,7 @@ function itemOut_(r) {
   return {
     id: String(r['ID']), name: String(r['Name']),
     // Older sheets had an "Eagle-required merit badge" category; it is now Merit badge + the Eagle required box.
-    cat: r['Category'] === 'Eagle-required merit badge' ? 'Merit badge' : String(r['Category'] || 'Other'),
+    cat: ({ 'Eagle-required merit badge': 'Merit badge', 'Uniform & patches': 'Uniform', 'Position patch': 'Position' })[r['Category']] || String(r['Category'] || 'Other'),
     eagleReq: r['Eagle required'] === true || String(r['Eagle required']).toUpperCase() === 'TRUE' || r['Category'] === 'Eagle-required merit badge',
     cost: Number(r['Cost']) || 0, rule: CHARGE_RULES.indexOf(r['Charge rule']) >= 0 ? r['Charge rule'] : 'Free',
     reorder: Number(r['Reorder at']) || 0, stockTo: Number(r['Stock to']) || 0,
