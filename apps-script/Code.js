@@ -24,7 +24,7 @@ const TABS = {
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
 
-const CATEGORIES = ['Rank', 'Merit badge', 'Uniform', 'Position', 'Rank pin', 'Award & card', 'Eagle', 'Other'];
+const CATEGORIES = ['Rank', 'Patrol patch', 'Merit badge', 'Uniform', 'Position', 'Rank pin', 'Award & card', 'Eagle', 'Other'];
 const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 // Pending: owed. Transferred to Treasurer: sent to the treasurer to collect. Waived: not charged (with a reason).
@@ -610,7 +610,7 @@ function addItem_(me, a) {
   if (readTable_('items').some(r => r['Active'] !== false && String(r['Name']).toLowerCase() === name.toLowerCase())) {
     throw apiError_('conflict', `${name} is already in the closet.`);
   }
-  const row = Object.assign({ 'ID': id_(), 'Name': name.slice(0, 100), 'Active': true }, itemPatch_(a, true));
+  const row = Object.assign({ 'ID': id_(), 'Name': titleCase_(name).slice(0, 100), 'Active': true }, itemPatch_(a, true));
   appendRows_('items', [row]);
   const start = Math.trunc(Number(a.startQty) || 0);
   if (start > 0) appendRows_('log', [{ 'ID': id_(), 'When': new Date(), 'Item ID': row['ID'], 'Item': row['Name'], 'Change': start, 'Type': 'count',
@@ -625,7 +625,7 @@ function updateItem_(me, a) {
   const touched = Object.keys(a).filter(k => k !== 'id');
   if (touched.some(k => leaderFields.indexOf(k) < 0)) need_(me, ['Admin']);
   const patch = itemPatch_(a, false);
-  if ('name' in a) { const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', 'Give the item a name.'); patch['Name'] = n.slice(0, 100); }
+  if ('name' in a) { const n = String(a.name).trim(); if (!n) throw apiError_('bad_request', 'Give the item a name.'); patch['Name'] = titleCase_(n).slice(0, 100); }
   if ('active' in a) patch['Active'] = !!a.active;
   updateRow_('items', it._row, patch);
   return true;
@@ -749,6 +749,15 @@ function deleteRows_(k, rowNums) {
 
 function itemsById_() { const m = {}; readTable_('items').forEach(r => { if (r['ID']) m[String(r['ID'])] = r; }); return m; }
 /** Scouts have First name and Last name columns (older sheets had a single Name). */
+/** Item names: capitalize each word ("merit badge sash" -> "Merit Badge Sash"); small words stay lowercase mid-name ("Citizenship in the World"). */
+function titleCase_(s) {
+  const small = ['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'with'];
+  return String(s).trim().replace(/\s+/g, ' ').split(' ').map((w, i) => {
+    const core = w.replace(/^\(/, '');
+    if (i > 0 && small.indexOf(core) >= 0) return w;
+    return w.replace(/[A-Za-z]/, c => c.toUpperCase());
+  }).join(' ');
+}
 function scoutName_(r) { return `${String(r['First name'] || '').trim()} ${String(r['Last name'] || '').trim()}`.trim() || String(r['Name'] || '').trim(); }
 function scoutById_(id) { return readTable_('scouts').find(r => String(r['ID']) === String(id)); }
 

@@ -192,6 +192,11 @@ test('first-one-free: a checked-in item does not use up the free one', () => {
   assert.strictEqual(ok(api(admin, 'give', { scoutId: s2, lines: [{ itemId: 'i2', qty: 1 }] })).charged, 0);
 });
 
+test('new item names are capitalized', () => {
+  const r = ok(api(admin, 'addItem', { name: 'citizenship in the world (older style)', cat: 'Merit badge' }));
+  assert.strictEqual(ok(api(admin, 'getData')).items.find(x => x.id === r.id).name, 'Citizenship in the World (Older Style)');
+});
+
 // --- leaders
 test('removing a leader signs them out', () => {
   ok(api(admin, 'saveLeader', { email: 'lee@example.com', name: 'Lee', role: 'Leader', active: false }));
