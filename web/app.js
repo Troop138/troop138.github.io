@@ -61,6 +61,7 @@ const ICONS = {
   give: '<circle cx="12" cy="9" r="5"/><path d="M8.5 13l-2 8 5.5-3 5.5 3-2-8"/>',
   restock: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M12 10v7M8.5 13.5h7"/><path d="M7 7V5a2 2 0 012-2h6a2 2 0 012 2v2"/>',
   reports: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  scouts: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.8"/><path d="M16.5 14.6c2.6.2 4.4 1.9 5 4.9"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
 };
 const icon = name => el('span', { 'aria-hidden': 'true', html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`, style: 'display:inline-flex' });
@@ -164,7 +165,7 @@ async function signOut() {
 }
 
 /* ---------- app shell ---------- */
-const TABS = [['give', 'Give out'], ['stock', 'Inventory'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
+const TABS = [['give', 'Give out'], ['scouts', 'Scouts'], ['stock', 'Inventory'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
 
 function startApp() {
   S.tab = 'give'; // always open on Give out
@@ -209,7 +210,7 @@ function render(full) {
     if (b.dataset.tab === S.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     const badge = b.querySelector('.badge');
     if (b.dataset.tab === 'reports') { badge.hidden = !(isRole('Admin', 'Treasurer') && pending); badge.textContent = pending; }
-    if (b.dataset.tab === 'more') { badge.hidden = !(isRole('Admin') && rosterTodo); badge.textContent = rosterTodo; }
+    if (b.dataset.tab === 'scouts') { badge.hidden = !(isRole('Admin') && rosterTodo); badge.textContent = rosterTodo; }
   });
   const title = S.settings.appTitle || 'Troop Closet';
   $('#apptitle').firstChild.textContent = title; $('#railhead').textContent = title; document.title = title;
@@ -218,12 +219,12 @@ function render(full) {
   const banner = $('#banner'); banner.replaceChildren();
   if (DEMO) banner.append(el('div', { class: 'banner demo', text: 'Demo mode: sample data only. Changes disappear when you reload.' }));
   if (S.error) banner.append(el('div', { class: 'banner', text: "Couldn't load the closet: " + S.error }));
-  if (isRole('Admin') && rosterTodo && !(S.tab === 'more' && S.sub === 'scouts')) banner.append(el('div', { class: 'banner', style: 'display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap' },
+  if (isRole('Admin') && rosterTodo && S.tab !== 'scouts') banner.append(el('div', { class: 'banner', style: 'display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap' },
     el('span', { text: `${rosterTodo} new scout${rosterTodo > 1 ? 's need' : ' needs'} roster details updated.` }),
-    el('button', { class: 'btn small', type: 'button', onclick: () => go('more', 'scouts') }, 'Review')));
+    el('button', { class: 'btn small', type: 'button', onclick: () => go('scouts') }, 'Review')));
   if (full) renderToolbar();
   $('#layout').className = 'layout'; document.body.classList.remove('split'); $('#aside').replaceChildren();
-  ({ stock: viewStock, give: viewGive, restock: viewRestock, reports: viewReports, more: viewMore })[S.tab]();
+  ({ stock: viewStock, give: viewGive, scouts: viewScoutsTab, restock: viewRestock, reports: viewReports, more: viewMore })[S.tab]();
 }
 
 function setSplit() { $('#layout').className = 'layout split'; document.body.classList.add('split'); }
@@ -243,6 +244,7 @@ function renderToolbar() {
   else if (S.tab === 'give' && S.give.scoutId) tb.append(itemSearch('q-give'), catChips());
   else if (S.tab === 'give') tb.append(searchBox('Who is getting items?', S.scoutQ, v => { S.scoutQ = v; render(); }, 'q-scout'));
   else if (S.tab === 'restock') tb.append(itemSearch('q-restock'), catChips());
+  else if (S.tab === 'scouts') tb.append(searchBox('Find a scout', S.scoutListQ || '', v => { S.scoutListQ = v; render(); }, 'q-scouts'));
 }
 function filteredItems() {
   const q = S.q.trim().toLowerCase();
@@ -784,7 +786,6 @@ function viewMore() {
     return;
   }
   const items = [
-    ['scouts', 'Scouts', 'Add scouts, see what each has received'],
     ['history', 'History', 'Recent entries, and undo your own'],
     ['paper', 'Print paper log', 'For leaders who would rather write it down'],
     ['share', 'Share the app', 'QR code and link for other leaders'],
@@ -797,14 +798,21 @@ function viewMore() {
     el('button', { type: 'button', class: 'row tap', onclick: signOut }, el('div', { class: 'main' }, el('div', { class: 'name', text: 'Sign out' }), el('div', { class: 'sub', text: S.me ? S.me.email : '' })))));
 }
 
-function viewScouts(v) {
+function viewScoutsTab() { setAction(null); if (loading()) return; const v = $('#view'); v.replaceChildren(); viewScouts(v, true); }
+function viewScouts(v, asTab) {
   const got = new Map(); for (const l of S.log) if (isGive(l) && l.scoutId) got.set(l.scoutId, (got.get(l.scoutId) || 0) - l.delta);
-  const list = el('div', { class: 'list' }), sc = activeScouts();
+  const money_ = isRole('Admin', 'Treasurer'), owes = new Map();
+  if (money_) for (const c of S.charges) if (c.status === 'Pending') owes.set(c.scoutId, (owes.get(c.scoutId) || 0) + c.amount);
+  const q = asTab ? String(S.scoutListQ || '').trim().toLowerCase() : '';
+  const list = el('div', { class: 'list' }), sc = activeScouts().filter(s => !q || s.name.toLowerCase().includes(q));
   if (!sc.length) list.append(el('div', { class: 'empty' }, el('strong', { text: 'No scouts yet' }), el('span', { text: 'Add scouts here or while giving out items.' })));
   for (const s of sc) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => scoutSheet(s.id) },
-    el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: `${got.get(s.id) || 0} items received` })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
+    el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: `${got.get(s.id) || 0} items received` })),
+    owes.get(s.id) ? el('span', { class: 'pill pending', text: `Owes ${money(owes.get(s.id))}` }) : null, el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
+  if (q && !sc.length) list.append(el('div', { class: 'empty', text: 'No scout by that name.' }));
   const review = isRole('Admin') ? [...S.scouts.values()].filter(s => s.needsUpdate).sort(byName) : [];
-  v.append(el('h2', { style: 'margin-top:12px', text: 'Scouts' }));
+  if (!asTab) v.append(el('h2', { style: 'margin-top:12px', text: 'Scouts' }));
+  if (money_ && owes.size) v.append(el('p', { class: 'muted mini', style: 'margin:12px 2px 0', text: `${owes.size} scout${owes.size > 1 ? 's owe' : ' owes'} ${money([...owes.values()].reduce((a, b) => a + b, 0))} in pending charges` }));
   if (review.length) {
     v.append(el('div', { class: 'card stack', style: 'margin-top:12px;border-color:var(--warn-fg)' },
       el('h3', { style: 'color:var(--warn-fg)', text: `Needs roster update (${review.length})` }),
@@ -827,6 +835,12 @@ function scoutSheet(id) {
     return el('div', { style: 'display:contents' },
       sheetHead(s.name, [isRole('Admin', 'Treasurer') && pend ? `${money(pend)} pending charges` : ''].filter(Boolean).join(' · ')),
       el('button', { class: 'btn primary', type: 'button', disabled: !s.active, onclick: () => { closeSheet(); S.give.scoutId = id; S.give.cart = {}; S.tab = 'give'; S.q = ''; render(true); } }, `Give items to ${s.name}`),
+      isRole('Admin', 'Treasurer') && ch.length ? (() => {
+        const p = ch.filter(c => c.status === 'Pending').sort((a, b) => b.at - a.at), t = ch.filter(c => c.status === 'Transferred to Treasurer'), sum = l => money(l.reduce((a, c) => a + c.amount, 0));
+        return el('div', { class: 'card stack' }, el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:8px' }, el('h3', { text: 'Owes' }), el('strong', { style: 'font-size:1.3rem', text: sum(p) })),
+          p.length ? p.map(c => el('div', { class: 'row', style: 'min-height:40px' }, el('div', { class: 'main' }, el('div', { class: 'name', text: `${c.itemName}${c.qty > 1 ? ' ×' + c.qty : ''}` }), el('div', { class: 'sub', text: fmtDate(c.at) })), el('div', { text: money(c.amount) }))) : el('div', { class: 'muted mini', text: 'Nothing pending.' }),
+          t.length ? el('div', { class: 'mini muted', text: `Transferred to Treasurer: ${sum(t)} (${t.length})` }) : null);
+      })() : null,
       el('div', {}, el('h3', { text: `Received (${recv.filter(l => !S.returned.has(l.id)).reduce((a, l) => a - l.delta, 0)})` }), recv.length ? recv.map(l => {
         const it = S.items.get(l.itemId), c = ch.find(x => x.logId === l.id), back = S.returned.has(l.id);
         const canReturn = !back && !(c && c.status === 'Transferred to Treasurer');
