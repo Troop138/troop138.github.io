@@ -24,7 +24,7 @@ const TABS = {
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
 
-const CATEGORIES = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Eagle', 'Award & card', 'Other'];
+const CATEGORIES = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Award & card', 'Eagle', 'Other'];
 const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 // Pending: owed. Transferred to Treasurer: sent to the treasurer to collect. Waived: not charged (with a reason).

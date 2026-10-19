@@ -7,7 +7,7 @@ const CFG = window.CLOSET_CONFIG || {};
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo') || CFG.apiUrl === 'demo';
 
-const CATS = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Eagle', 'Award & card', 'Other'];
+const CATS = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Award & card', 'Eagle', 'Other'];
 const CAT_SHORT = { 'Rank': 'Ranks', 'Merit badge': 'Merit badges', 'Uniform & patches': 'Uniform & patches', 'Position patch': 'Position patches', 'Rank pin': 'Rank pins', 'Eagle': 'Eagle', 'Award & card': 'Awards & cards', 'Other': 'Other' };
 // Eagle-required merit badges get a small eagle next to their name.
 const nameEl = (it, cls) => el('div', { class: 'name' + (cls ? ' ' + cls : '') }, it.name, it.eagleReq ? el('span', { class: 'eaglereq', title: 'Eagle required', 'aria-label': 'Eagle required', text: '🦅' }) : null);
