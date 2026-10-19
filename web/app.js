@@ -593,8 +593,8 @@ const REPORTS = [
   ['reorder', 'Reorder list', 'What to buy on the next council run', null],
   ['activity', 'Activity', 'Given out and restocked, by date range', null],
   ['scout', 'Scout history', 'Everything one scout has received', null],
-  ['charges', 'Charges', 'Money owed, and what was transferred to the treasurer', ['Admin', 'Treasurer']],
-  ['shrink', 'Shelf count fixes', 'Corrections from shelf counts', ['Admin']],
+  ['charges', 'Charges', 'Money owed, and what was transferred to the treasurer', null],
+  ['shrink', 'Shelf count fixes', 'Corrections from shelf counts', null],
   ['returns', 'Check back in', 'Put items nobody picked up back in stock', null],
 ];
 function viewReports() {
@@ -716,7 +716,7 @@ function repScout() {
   const kept = got.filter(l => !S.returned.has(l.id));
   const ch = S.charges.filter(c => c.scoutId === id);
   const chargeFor = l => ch.find(c => c.logId === l.id);
-  const showMoney = isRole('Admin', 'Treasurer');
+  const showMoney = true;
   return {
     controls, subtitle: s ? s.name : '',
     kpis: [['Items received', kept.reduce((a, l) => a - l.delta, 0)], ...(showMoney ? [['Pending charges', money(ch.filter(c => c.status === 'Pending').reduce((a, c) => a + c.amount, 0))], ['Transferred to Treasurer', money(ch.filter(c => c.status === 'Transferred to Treasurer').reduce((a, c) => a + c.amount, 0))]] : [])],
@@ -731,8 +731,9 @@ function repCharges() {
   const list = S.charges.filter(c => st === 'All' || c.status === st).sort((a, b) => a.scoutName.localeCompare(b.scoutName) || a.at - b.at);
   const total = list.reduce((s, c) => s + c.amount, 0);
   const sel = S.rep.sel, selIds = Object.keys(sel).filter(k => sel[k]);
-  const extra = el('div', {});
-  if (st === 'Pending' && list.length) {
+  const extra = el('div', {}), manage = isRole('Admin', 'Treasurer');
+  if (!manage) extra.append(el('p', { class: 'mini muted', style: 'margin:12px 2px 0', text: 'Only the closet admin and treasurer can mark charges transferred or waived.' }));
+  if (manage && st === 'Pending' && list.length) {
     const reason = el('input', { id: 'waivewhy', placeholder: 'Reason for waiving', autocomplete: 'off' });
     extra.append(el('div', { class: 'card stack', style: 'margin-top:12px' },
       el('div', { class: 'mini muted', text: selIds.length ? `${selIds.length} selected · ${money(list.filter(c => sel[c.id]).reduce((s, c) => s + c.amount, 0))}` : 'Tick the charges you are sending to the treasurer, then mark them transferred.' }),
@@ -744,7 +745,7 @@ function repCharges() {
         save('setChargeStatus', { ids: selIds, status: 'Waived', reason: reason.value.trim() }, `Waived ${selIds.length}`, () => { S.rep.sel = {}; });
       } }, 'Waive'))));
   }
-  if (st === 'Transferred to Treasurer' && list.length) extra.append(el('div', { class: 'card rowbtns', style: 'margin-top:12px;align-items:center' },
+  if (manage && st === 'Transferred to Treasurer' && list.length) extra.append(el('div', { class: 'card rowbtns', style: 'margin-top:12px;align-items:center' },
     el('span', { class: 'mini muted', style: 'flex:2', text: selIds.length ? `${selIds.length} selected` : 'Marked by mistake? Tick it and set it back to pending.' }),
     el('button', { class: 'btn small', type: 'button', disabled: !selIds.length || S.busy, onclick: () => save('setChargeStatus', { ids: selIds, status: 'Pending' }, `${selIds.length} back to pending`, () => { S.rep.sel = {}; }) }, 'Back to pending')));
   // Grouped by scout, with checkboxes for pending and transferred.
@@ -754,7 +755,7 @@ function repCharges() {
     const sum = cs.reduce((s, c) => s + c.amount, 0);
     body.append(el('div', { class: 'group-h', style: 'display:flex;justify-content:space-between' }, el('span', { text: name }), el('span', { text: money(sum) })));
     cs.forEach(c => {
-      const box = st === 'Pending' || st === 'Transferred to Treasurer' ? el('input', { type: 'checkbox', class: 'check', 'aria-label': `Select ${c.itemName} for ${name}` }) : null;
+      const box = manage && (st === 'Pending' || st === 'Transferred to Treasurer') ? el('input', { type: 'checkbox', class: 'check', 'aria-label': `Select ${c.itemName} for ${name}` }) : null;
       if (box) { box.checked = !!sel[c.id]; box.onchange = () => { sel[c.id] = box.checked; render(); }; }
       body.append(el('label', { class: 'row', style: 'min-height:52px' }, box,
         el('div', { class: 'main' }, el('div', { class: 'name', text: `${c.itemName}${c.qty > 1 ? ' ×' + c.qty : ''}` }),
@@ -810,7 +811,7 @@ function viewMore() {
 function viewScoutsTab() { setAction(null); if (loading()) return; const v = $('#view'); v.replaceChildren(); viewScouts(v, true); }
 function viewScouts(v, asTab) {
   const got = new Map(); for (const l of S.log) if (isGive(l) && l.scoutId) got.set(l.scoutId, (got.get(l.scoutId) || 0) - l.delta);
-  const money_ = isRole('Admin', 'Treasurer'), owes = new Map();
+  const money_ = true, owes = new Map();
   if (money_) for (const c of S.charges) if (c.status === 'Pending') owes.set(c.scoutId, (owes.get(c.scoutId) || 0) + c.amount);
   const q = asTab ? String(S.scoutListQ || '').trim().toLowerCase() : '';
   const list = el('div', { class: 'list' }), sc = activeScouts().filter(s => !q || s.name.toLowerCase().includes(q));
@@ -842,9 +843,9 @@ function scoutSheet(id) {
     const recv = S.log.filter(l => l.scoutId === id && l.kind === 'out').sort((a, b) => b.at - a.at);
     const ch = S.charges.filter(c => c.scoutId === id), pend = ch.filter(c => c.status === 'Pending').reduce((a, c) => a + c.amount, 0);
     return el('div', { style: 'display:contents' },
-      sheetHead(s.name, [isRole('Admin', 'Treasurer') && pend ? `${money(pend)} pending charges` : ''].filter(Boolean).join(' · ')),
+      sheetHead(s.name, [pend ? `${money(pend)} pending charges` : ''].filter(Boolean).join(' · ')),
       el('button', { class: 'btn primary', type: 'button', disabled: !s.active, onclick: () => { closeSheet(); S.give.scoutId = id; S.give.cart = {}; S.tab = 'give'; S.q = ''; render(true); } }, `Give items to ${s.name}`),
-      isRole('Admin', 'Treasurer') && ch.length ? (() => {
+      ch.length ? (() => {
         const p = ch.filter(c => c.status === 'Pending').sort((a, b) => b.at - a.at), t = ch.filter(c => c.status === 'Transferred to Treasurer'), sum = l => money(l.reduce((a, c) => a + c.amount, 0));
         return el('div', { class: 'card stack' }, el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:8px' }, el('h3', { text: 'Owes' }), el('strong', { style: 'font-size:1.3rem', text: sum(p) })),
           p.length ? p.map(c => el('div', { class: 'row', style: 'min-height:40px' }, el('div', { class: 'main' }, el('div', { class: 'name', text: `${c.itemName}${c.qty > 1 ? ' ×' + c.qty : ''}` }), el('div', { class: 'sub', text: fmtDate(c.at) })), el('div', { text: money(c.amount) }))) : el('div', { class: 'muted mini', text: 'Nothing pending.' }),
@@ -910,7 +911,7 @@ function viewAdmin(v) {
     el('div', { class: 'main' }, el('div', { class: 'name' + (l.active ? '' : ' muted'), text: l.name || l.email }), el('div', { class: 'sub' }, el('span', { text: l.email }), l.active ? null : el('span', { text: '· removed' }))),
     el('span', { class: 'pill' + (l.role === 'Admin' ? ' eagle' : l.role === 'Treasurer' ? ' pending' : ''), text: l.role }))));
   v.append(el('h2', { style: 'margin-top:12px', text: 'Leaders & access' }),
-    el('p', { class: 'mini muted', text: 'People sign in with the Google account listed here. Leader: give out, restock, reports. Treasurer: also posts and waives charges. Admin: everything, including items, costs and this list.' }),
+    el('p', { class: 'mini muted', text: 'People sign in with the Google account listed here. Leader: give out, restock, check back in, reports, and see charges. Treasurer: also marks charges transferred or waived. Admin: everything, including items, costs and this list.' }),
     el('button', { class: 'btn primary', type: 'button', onclick: () => leaderSheet('') }, '+ Add a leader'), list);
 }
 function leaderSheet(email) {

@@ -33,7 +33,7 @@ Roles, set on the **Leaders** tab:
 
 | Role | Can |
 |---|---|
-| Leader | Give out, restock, shelf counts, add scouts (first and last name), reports. Undo their own entries for 24 hours. |
+| Leader | Give out, restock, shelf counts, add scouts (first and last name), reports including charges (view only). Undo their own entries for 24 hours. |
 | Treasurer | Everything a leader can, plus mark charges Transferred to Treasurer or Waived. |
 | Admin | Everything, plus items, costs, charge rules, leaders, and removing any entry. |
 
