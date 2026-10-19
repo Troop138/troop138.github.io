@@ -115,7 +115,7 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 ### 7. Add leaders and set up items
 
 1. Open the site, sign in as the troop account, and go to **More → Leaders & access**. Add your own Gmail as **Admin**, plus the treasurer and other leaders. You can also edit the **Leaders** tab directly.
-2. On the **Stock** tab, open each item to set its cost and charge rule, or edit the **Items** tab.
+2. On the **Inventory** tab, open each item to set its cost and charge rule, or edit the **Items** tab.
 3. Use **Restock** (or **Set count** on an item) to enter what's on the shelf.
 4. Use **More → Share the app** for a QR code leaders can scan, then have them add it to their home screen.
 
@@ -137,7 +137,7 @@ The app reads columns by header name, so you can reorder columns, but don't rena
 | Charges | Status (dropdown). The date and who changed it are filled in automatically. | ID, Amount |
 | Settings | Values in the Value column | Setting names |
 | Log | Nothing. Fix counts with **Set count** and mistakes with **History → remove** in the app, so every change is recorded. | |
-| Stock, Balances | Nothing. They're formulas. | |
+| Inventory, Balances | Nothing. They're formulas. | |
 
 Protected ranges show a warning before you edit something the app depends on. To roll back a mistake, use **File → Version history** in the sheet, or open a copy in the **Troop Closet backups** folder.
 

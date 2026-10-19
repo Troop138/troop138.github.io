@@ -18,13 +18,13 @@
 const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
-  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Active'] },
+  items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Active', 'Eagle required'] },
   scouts:   { name: 'Scouts',   headers: ['ID', 'First name', 'Last name', 'Patrol', 'Active', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost', 'Returns'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
 
-const CATEGORIES = ['Rank', 'Rank pin', 'Eagle-required merit badge', 'Merit badge', 'Eagle', 'Award & card', 'Uniform & patches', 'Other'];
+const CATEGORIES = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Eagle', 'Award & card', 'Other'];
 const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 // Pending: owed. Transferred to Treasurer: sent to the treasurer to collect. Waived: not charged (with a reason).
@@ -42,12 +42,12 @@ const SETTINGS_DEFAULTS = [
 
 const STARTER_ITEMS = [
   ...['Scout', 'Tenderfoot', 'Second Class', 'First Class', 'Star', 'Life', 'Eagle']
-    .map(n => [n, 'Rank', 'Free', n === 'Eagle' ? 1 : 3]),
+    .map(n => [n, 'Rank', 'First one free', n === 'Eagle' ? 1 : 3]),
   ...['Camping', 'Citizenship in Society', 'Citizenship in the Community', 'Citizenship in the Nation',
     'Citizenship in the World', 'Communication', 'Cooking', 'Cycling', 'Emergency Preparedness',
     'Environmental Science', 'Family Life', 'First Aid', 'Hiking', 'Lifesaving', 'Personal Fitness',
     'Personal Management', 'Sustainability', 'Swimming']
-    .map(n => [n, 'Eagle-required merit badge', 'First one free', 2]),
+    .map(n => [n, 'Merit badge', 'First one free', 2, true]),
   ...['Archery', 'Art', 'Astronomy', 'Canoeing', 'Chemistry', 'Chess', 'Climbing', 'Digital Technology',
     'Engineering', 'Fingerprinting', 'Fire Safety', 'Fishing', 'Geocaching', 'Kayaking', 'Leatherwork',
     'Metalwork', 'Orienteering', 'Photography', 'Pioneering', 'Programming', 'Rifle Shooting', 'Robotics',
@@ -56,7 +56,7 @@ const STARTER_ITEMS = [
     .map(n => [n, 'Merit badge', 'First one free', 1]),
   ["Totin' Chip card", 'Award & card', 'First one free', 5],
   ["Firem'n Chit card", 'Award & card', 'First one free', 5],
-  ['Merit badge sash', 'Award & card', 'Always charge', 2],
+  ['Merit badge sash', 'Award & card', 'First one free', 2],
 ];
 
 /* =====================================================================
@@ -85,7 +85,7 @@ function setup() {
   // Starter item list at zero on hand.
   const items = sheet_('items');
   if (lastDataRow_(items) < 2) {
-    const rows = STARTER_ITEMS.map(([n, c, rule, re]) => [id_(), n, c, 0, rule, re, re * 2, true]);
+    const rows = STARTER_ITEMS.map(([n, c, rule, re, eagle]) => [id_(), n, c, 0, rule, re, re * 2, true, !!eagle]);
     items.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
 
@@ -96,7 +96,7 @@ function setup() {
   ensureTriggers_();
 
   ['Sheet1'].forEach(n => { const s = ss.getSheetByName(n); if (s && s.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(s); });
-  ss.setActiveSheet(ss.getSheetByName('Stock'));
+  ss.setActiveSheet(ss.getSheetByName('Inventory'));
   return 'Setup complete';
 }
 
@@ -124,6 +124,7 @@ function applyFormatting_(ss) {
   col_(it, ih, 'Category').setDataValidation(listRule(CATEGORIES));
   col_(it, ih, 'Charge rule').setDataValidation(listRule(CHARGE_RULES));
   col_(it, ih, 'Cost').setNumberFormat('$#,##0.00');
+  if (lastDataRow_(it) > 1) it.getRange(2, ih['Eagle required'] + 1, lastDataRow_(it) - 1, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
 
   const sc = sheet_('scouts'), sh = headerMap_(sc);
   fillBlankActive_(sc, sh);
@@ -179,8 +180,9 @@ function buildReportTabs_(ss) {
   const ih = headerMap_(sheet_('items')), lh = headerMap_(sheet_('log')), chh = headerMap_(sheet_('charges'));
   const L = (h, name) => colLetter_(h[name] + 1);
 
-  // Stock: on hand is always the sum of the Log, never typed in.
-  let s = ss.getSheetByName('Stock') || ss.insertSheet('Stock', 0);
+  // Inventory: on hand is always the sum of the Log, never typed in. (Older versions called this tab Stock.)
+  const old = ss.getSheetByName('Stock'); if (old && !ss.getSheetByName('Inventory')) old.setName('Inventory');
+  let s = ss.getSheetByName('Inventory') || ss.insertSheet('Inventory', 0);
   s.clear(); s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
   s.getRange('A1:G1').setValues([['Item', 'Category', 'On hand', 'Cost', 'Reorder at', 'Value', 'Status']]).setFontWeight('bold').setBackground('#e3e6da');
   s.setFrozenRows(1);
@@ -199,7 +201,7 @@ function buildReportTabs_(ss) {
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Out').setBackground('#f6d6cf').setFontColor('#8e2a18').setRanges([s.getRange('G2:G')]).build(),
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Low').setBackground('#f6e7c4').setFontColor('#7a5410').setRanges([s.getRange('G2:G')]).build(),
   ]);
-  s.protect().setDescription('Stock is calculated from Items and Log. Edit those instead.').setWarningOnly(true);
+  s.protect().setDescription('Inventory is calculated from Items and Log. Edit those instead.').setWarningOnly(true);
 
   // Balances: pending charges by scout, for the treasurer.
   let b = ss.getSheetByName('Balances') || ss.insertSheet('Balances');
@@ -405,7 +407,10 @@ function getData_(me) {
 
 function itemOut_(r) {
   return {
-    id: String(r['ID']), name: String(r['Name']), cat: String(r['Category'] || 'Other'),
+    id: String(r['ID']), name: String(r['Name']),
+    // Older sheets had an "Eagle-required merit badge" category; it is now Merit badge + the Eagle required box.
+    cat: r['Category'] === 'Eagle-required merit badge' ? 'Merit badge' : String(r['Category'] || 'Other'),
+    eagleReq: r['Eagle required'] === true || String(r['Eagle required']).toUpperCase() === 'TRUE' || r['Category'] === 'Eagle-required merit badge',
     cost: Number(r['Cost']) || 0, rule: CHARGE_RULES.indexOf(r['Charge rule']) >= 0 ? r['Charge rule'] : 'Free',
     reorder: Number(r['Reorder at']) || 0, stockTo: Number(r['Stock to']) || 0,
     active: r['Active'] !== false,
@@ -433,6 +438,7 @@ function give_(me, a) {
   const scout = scoutById_(a.scoutId);
   if (!scout || scout['Active'] === false) throw apiError_('bad_request', 'That scout is not on the active list.');
   const lines = cleanLines_(a.lines);
+  if (me.role !== 'Admin' && lines.some(l => String(l.waiveReason || '').trim())) throw apiError_('forbidden', 'Only the closet admin can give an item without charging.');
   const ctx = giveContext_();
   lines.forEach(l => giveOne_(me, ctx, scout, l.itemId, l.qty, '', l.waiveReason));
   const logRows = ctx.logRows, chargeRows = ctx.chargeRows;
@@ -633,6 +639,7 @@ function itemPatch_(a, withDefaults) {
   if ('rule' in a || withDefaults) p['Charge rule'] = CHARGE_RULES.indexOf(a.rule) >= 0 ? a.rule : 'Free';
   if ('reorder' in a || withDefaults) p['Reorder at'] = Math.max(0, Math.trunc(Number(a.reorder) || 0));
   if ('stockTo' in a || withDefaults) p['Stock to'] = Math.max(0, Math.trunc(Number(a.stockTo) || 0));
+  if ('eagleReq' in a || withDefaults) p['Eagle required'] = !!a.eagleReq;
   return p;
 }
 
@@ -728,7 +735,7 @@ function appendRows_(k, objs) {
   if (at + rows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), at + rows.length - 1 - sh.getMaxRows() + 100);
   sh.getRange(at, 1, rows.length, width).setValues(rows);
   if (typeof SpreadsheetApp.newDataValidation === 'function') {
-    ['Active', 'Needs roster update'].forEach(c => { if (h[c] != null) sh.getRange(at, h[c] + 1, rows.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build()); });
+    ['Active', 'Needs roster update', 'Eagle required'].forEach(c => { if (h[c] != null) sh.getRange(at, h[c] + 1, rows.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build()); });
   }
 }
 

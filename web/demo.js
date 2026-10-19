@@ -18,11 +18,11 @@
       ss.getSheetByName('Leaders').appendRow(['demo.admin@example.com', 'Demo Admin', 'Admin', true]);
       ss.getSheetByName('Leaders').appendRow(['demo.leader@example.com', 'Demo Leader', 'Leader', true]);
       ss.getSheetByName('Leaders').appendRow(['demo.treasurer@example.com', 'Demo Treasurer', 'Treasurer', true]);
-      const prices = { 'Rank': 1.89, 'Eagle-required merit badge': 3.49, 'Merit badge': 3.49, 'Award & card': 0.99, 'Other': 1 };
+      const prices = { 'Rank': 3.29, 'Merit badge': 3.99, 'Award & card': 0.29, 'Other': 1 };
       const items = ss.getSheetByName('Items');
-      STARTER_ITEMS.forEach(([n, c, rule, re], i) => {
-        const cost = n === 'Merit badge sash' ? 24.99 : prices[c];
-        items.appendRow(['d' + i, n, c, cost, rule, re, re * 2, true]);
+      STARTER_ITEMS.forEach(([n, c, rule, re, eagle], i) => {
+        const cost = n === 'Merit badge sash' ? 16.99 : prices[c];
+        items.appendRow(['d' + i, n, c, cost, rule, re, re * 2, true, !!eagle]);
       });
       const scouts = ss.getSheetByName('Scouts');
       [['Sample Scout A', 'Panthers'], ['Sample Scout B', 'Panthers'], ['Sample Scout C', 'Hawks'], ['Sample Scout D', 'Hawks']]

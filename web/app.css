@@ -201,3 +201,4 @@ table.report tr.grouprow td{background:var(--accent-soft);color:var(--accent);fo
 .poster svg{width:4.5in;height:4.5in}
 
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
+.eaglereq{margin-left:6px;font-size:.95em}

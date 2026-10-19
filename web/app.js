@@ -7,8 +7,10 @@ const CFG = window.CLOSET_CONFIG || {};
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo') || CFG.apiUrl === 'demo';
 
-const CATS = ['Rank', 'Rank pin', 'Eagle-required merit badge', 'Merit badge', 'Eagle', 'Award & card', 'Uniform & patches', 'Other'];
-const CAT_SHORT = { 'Rank': 'Ranks', 'Rank pin': 'Rank pins', 'Eagle-required merit badge': 'Eagle-req. MB', 'Merit badge': 'Merit badges', 'Eagle': 'Eagle', 'Award & card': 'Awards & cards', 'Uniform & patches': 'Uniform & patches', 'Other': 'Other' };
+const CATS = ['Rank', 'Merit badge', 'Uniform & patches', 'Position patch', 'Rank pin', 'Eagle', 'Award & card', 'Other'];
+const CAT_SHORT = { 'Rank': 'Ranks', 'Merit badge': 'Merit badges', 'Uniform & patches': 'Uniform & patches', 'Position patch': 'Position patches', 'Rank pin': 'Rank pins', 'Eagle': 'Eagle', 'Award & card': 'Awards & cards', 'Other': 'Other' };
+// Eagle-required merit badges get a small eagle next to their name.
+const nameEl = (it, cls) => el('div', { class: 'name' + (cls ? ' ' + cls : '') }, it.name, it.eagleReq ? el('span', { class: 'eaglereq', title: 'Eagle required', 'aria-label': 'Eagle required', text: '🦅' }) : null);
 const RULES = ['Free', 'Always charge', 'First one free'];
 const ROLES = ['Admin', 'Leader', 'Treasurer'];
 
@@ -162,7 +164,7 @@ async function signOut() {
 }
 
 /* ---------- app shell ---------- */
-const TABS = [['give', 'Give out'], ['stock', 'Stock'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
+const TABS = [['give', 'Give out'], ['stock', 'Inventory'], ['restock', 'Restock'], ['reports', 'Reports'], ['more', 'More']];
 
 function startApp() {
   S.tab = 'give'; // always open on Give out
@@ -255,7 +257,6 @@ function grouped(items) {
 function itemSub(it) {
   const s = status(it);
   return el('div', { class: 'sub' },
-    it.cat === 'Eagle-required merit badge' ? el('span', { class: 'pill eagle', text: 'Eagle req.' }) : null,
     s === 'out' ? el('span', { class: 'pill out', text: 'Out' }) : s === 'low' ? el('span', { class: 'pill low', text: 'Low' }) : null,
     it.cost > 0 ? el('span', { text: money(it.cost) + (it.rule === 'Free' ? '' : it.rule === 'Always charge' ? ' · charged' : ' · first free') }) : null);
 }
@@ -287,7 +288,7 @@ function viewStock() {
   for (const [c, g] of grouped(items)) {
     list.append(el('div', { class: 'group-h', text: CAT_SHORT[c] }));
     for (const it of g) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => itemSheet(it.id) },
-      el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }), itemSub(it)), el('div', { class: 'qty', text: String(qtyOf(it.id)) })));
+      el('div', { class: 'main' }, nameEl(it), itemSub(it)), el('div', { class: 'qty', text: String(qtyOf(it.id)) })));
   }
   v.append(list);
   if (isRole('Admin')) v.append(el('div', { style: 'display:flex;justify-content:center;padding-top:20px' }, el('button', { class: 'btn', type: 'button', onclick: () => itemForm() }, '+ Add item')));
@@ -328,7 +329,7 @@ function cartRows(cart, mode) {
     for (const it of g) {
       const line = cart[it.id], n = line ? line.n : 0, have = qtyOf(it.id), short = mode === 'give' && n > have;
       const set = k => { addToCart(cart, it.id, k); render(); };
-      const main = el('div', { class: 'main' }, el('div', { class: 'name', text: it.name }),
+      const main = el('div', { class: 'main' }, nameEl(it),
         el('div', { class: 'onhand' + (short ? ' short' : ''), text: short ? `Only ${have} on hand` : `${have} on hand` + (mode === 'restock' && n ? ` → ${have + n}` : '') }));
       if (mode === 'give' && n) {
         const cq = chargedQty(it, S.give.scoutId, n);
@@ -336,8 +337,8 @@ function cartRows(cart, mode) {
           const amt = money(cq * it.cost), replacing = it.rule === 'First one free';
           const sub = el('div', { class: 'sub' });
           if (line.waive === null) {
-            sub.append(el('span', { class: 'pill charge', text: `${replacing ? 'Replacement' : 'Charge'} · ${amt}` }),
-              el('button', { class: 'linkbtn', type: 'button', onclick: () => { line.waive = ''; render(); setTimeout(() => { const x = document.getElementById('waive-' + it.id); if (x) x.focus(); }, 30); } }, 'No charge'));
+            sub.append(...[el('span', { class: 'pill charge', text: `${replacing ? 'Replacement' : 'Charge'} · ${amt}` }),
+              !isRole('Admin') ? null : el('button', { class: 'linkbtn', type: 'button', onclick: () => { line.waive = ''; render(); setTimeout(() => { const x = document.getElementById('waive-' + it.id); if (x) x.focus(); }, 30); } }, 'No charge')].filter(Boolean));
             main.append(sub);
           } else {
             const inp = el('input', { id: 'waive-' + it.id, placeholder: 'Why no charge? (required)', value: line.waive, autocomplete: 'off' });
@@ -519,17 +520,19 @@ function itemSheet(id) {
       const cat = el('select', { id: 'ecat' }, CATS.map(c => el('option', { value: c, text: c }))); cat.value = it.cat;
       const cost = el('input', { id: 'ecost', type: 'number', inputmode: 'decimal', step: '0.01', min: '0', value: it.cost ? it.cost.toFixed(2) : '0' });
       const rule = el('select', { id: 'erule' }, RULES.map(r => el('option', { value: r, text: r }))); rule.value = it.rule;
-      return el('form', { class: 'stack card', onsubmit: e => { e.preventDefault(); save('updateItem', { id, name: name.value, cat: cat.value, cost: Number(cost.value) || 0, rule: rule.value }, 'Saved'); } },
+      const eagle = el('input', { id: 'eeagle', type: 'checkbox', class: 'check' }); eagle.checked = !!it.eagleReq;
+      return el('form', { class: 'stack card', onsubmit: e => { e.preventDefault(); save('updateItem', { id, name: name.value, cat: cat.value, cost: Number(cost.value) || 0, rule: rule.value, eagleReq: eagle.checked }, 'Saved'); } },
         el('h3', { text: 'Item details' }),
         el('div', { class: 'field' }, el('label', { for: 'ename', text: 'Name' }), name),
         el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'ecat', text: 'Type' }), cat), el('div', { class: 'field' }, el('label', { for: 'ecost', text: 'Cost each' }), cost)),
         el('div', { class: 'field' }, el('label', { for: 'erule', text: 'Charge rule' }), rule),
+        el('label', { class: 'row', for: 'eeagle', style: 'min-height:44px' }, eagle, el('div', { class: 'main' }, el('div', { class: 'name', text: 'Eagle required 🦅' }))),
         el('p', { class: 'mini muted', style: 'margin:0', text: 'Free: never charged. Always charge: every time. First one free: free the first time a scout gets it, charged after.' }),
         el('button', { class: 'btn', type: 'submit' }, 'Save details'));
     };
 
     return el('div', { style: 'display:contents' },
-      sheetHead(it.name, `${it.cat} · ${it.cost > 0 ? money(it.cost) + ' · ' + it.rule : 'No cost set'}`),
+      sheetHead(it.name + (it.eagleReq ? ' 🦅' : ''), `${it.cat}${it.eagleReq ? ' · Eagle required' : ''} · ${it.cost > 0 ? money(it.cost) + ' · ' + it.rule : 'No cost set'}`),
       el('div', { class: 'bigqty' }, el('span', { class: 'qty', text: String(q) }), el('span', { class: 'muted', text: 'on hand' }), itemSub(it)),
       el('div', { class: 'rowbtns' },
         el('button', { class: 'btn primary', type: 'button', onclick: () => { closeSheet(); S.tab = 'give'; S.q = it.name; S.cat = 'all'; render(true); } }, 'Give out'),

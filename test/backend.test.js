@@ -124,8 +124,9 @@ test('replacement card is charged', () => {
   const r = ok(api(lee, 'give', { scoutId, lines: [{ itemId: 'i2', qty: 2 }] }));
   assert.strictEqual(r.charged, 2);
 });
-test('waived charge is recorded as Waived with reason', () => {
-  ok(api(lee, 'give', { scoutId, lines: [{ itemId: 'i2', qty: 1, waiveReason: 'Card was misprinted' }] }));
+test('only admins waive; waived charge is recorded as Waived with reason', () => {
+  assert.strictEqual(api(lee, 'give', { scoutId, lines: [{ itemId: 'i2', qty: 1, waiveReason: 'Card was misprinted' }] }).code, 'forbidden', 'leaders cannot waive');
+  ok(api(admin, 'give', { scoutId, lines: [{ itemId: 'i2', qty: 1, waiveReason: 'Card was misprinted' }] }));
   const ch = ok(api(admin, 'getData')).charges;
   const w = ch.find(c => c.status === 'Waived');
   assert.ok(w); assert.strictEqual(w.reason, 'Card was misprinted');
