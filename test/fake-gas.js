@@ -41,6 +41,7 @@ class Sheet {
   getLastColumn() { return Math.max(0, ...this.data.map(r => { let n = r.length; while (n > 0 && (r[n - 1] === '' || r[n - 1] === undefined)) n--; return n; })); }
   getMaxRows() { return Math.max(1000, this.data.length); }
   getRange(r, c, nr = 1, nc = 1) { return new Range(this, r, c, nr, nc); }
+  getDataRange() { return new Range(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   appendRow(row) { this.data.push(row.slice()); }
   deleteRow(r) { this.data.splice(r - 1, 1); }
 }

@@ -273,6 +273,7 @@ function doGet() {
 }
 
 function doPost(e) {
+  Object.keys(MEMO_).forEach(forget_); // fresh reads for every request
   let req;
   try { req = JSON.parse(e.postData && e.postData.contents || '{}'); }
   catch (err) { return json_({ ok: false, code: 'bad_request', error: 'Request was not valid JSON.' }); }
@@ -691,8 +692,22 @@ function saveLeader_(me, a) {
  * Helpers
  * ===================================================================== */
 
+// Each request reads a tab at most once (one getDataRange call) and reuses it; any write to that tab drops the copy.
+const MEMO_ = {};
+function memo_(k) {
+  if (!MEMO_[k]) {
+    const sh = sheet_(k), vals = sh.getDataRange().getValues(), h = {};
+    (vals[0] || []).forEach((x, i) => { if (x !== '') h[String(x).trim()] = i; });
+    const kc = keyCol_(h);
+    let last = vals.length; while (last > 1 && (vals[last - 1][kc] === '' || vals[last - 1][kc] === null)) last--;
+    MEMO_[k] = { sh, h, vals, last, width: (vals[0] || []).length };
+  }
+  return MEMO_[k];
+}
+function forget_(k) { delete MEMO_[k]; }
+
 function sheet_(k) {
-  const sh = SpreadsheetApp.getActive().getSheetByName(TABS[k].name);
+  const sh = (sheet_.ss || (sheet_.ss = SpreadsheetApp.getActive())).getSheetByName(TABS[k].name);
   if (!sh) throw apiError_('not_configured', `The ${TABS[k].name} tab is missing. Run setup again.`);
   return sh;
 }
@@ -729,17 +744,16 @@ function col_(sh, h, name) {
 
 /** Read a tab into objects keyed by header. Each object has `_row` (sheet row number). */
 function readTable_(k) {
-  const sh = sheet_(k), h = headerMap_(sh), n = lastDataRow_(sh) - 1;
-  if (n < 1) return [];
-  const vals = sh.getRange(2, 1, n, sh.getLastColumn()).getValues();
-  return vals.map((v, i) => { const o = { _row: i + 2 }; Object.keys(h).forEach(name => { o[name] = v[h[name]]; }); return o; });
+  const m = memo_(k), names = Object.keys(m.h);
+  return m.vals.slice(1, m.last).map((v, i) => { const o = { _row: i + 2 }; names.forEach(name => { o[name] = v[m.h[name]]; }); return o; });
 }
 
 function appendRows_(k, objs) {
   if (!objs.length) return;
-  const sh = sheet_(k), h = headerMap_(sh), width = sh.getLastColumn();
+  const m = memo_(k), sh = m.sh, h = m.h, width = m.width;
+  forget_(k);
   const rows = objs.map(o => { const r = new Array(width).fill(''); Object.keys(o).forEach(name => { if (h[name] != null) r[h[name]] = o[name]; }); return r; });
-  const at = lastDataRow_(sh) + 1;
+  const at = m.last + 1;
   if (at + rows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), at + rows.length - 1 - sh.getMaxRows() + 100);
   sh.getRange(at, 1, rows.length, width).setValues(rows);
   if (typeof SpreadsheetApp.newDataValidation === 'function') {
@@ -748,12 +762,13 @@ function appendRows_(k, objs) {
 }
 
 function updateRow_(k, row, patch) {
-  const sh = sheet_(k), h = headerMap_(sh);
-  Object.keys(patch).forEach(name => { if (h[name] != null) sh.getRange(row, h[name] + 1).setValue(patch[name]); });
+  const m = memo_(k); forget_(k);
+  Object.keys(patch).forEach(name => { if (m.h[name] != null) m.sh.getRange(row, m.h[name] + 1).setValue(patch[name]); });
 }
 
 function deleteRows_(k, rowNums) {
-  const sh = sheet_(k);
+  if (!rowNums.length) return;
+  const sh = sheet_(k); forget_(k);
   rowNums.slice().sort((x, y) => y - x).forEach(r => sh.deleteRow(r));
 }
 
@@ -789,13 +804,13 @@ function cleanLines_(lines) {
 }
 
 function getSetting_(name) {
-  const sh = SpreadsheetApp.getActive().getSheetByName(TABS.settings.name);
-  if (!sh || lastDataRow_(sh) < 2) return '';
-  const v = sh.getRange(2, 1, lastDataRow_(sh) - 1, 2).getValues().find(r => String(r[0]).trim() === name);
+  const m = memo_('settings');
+  const v = m.vals.slice(1, m.last).find(r => String(r[0]).trim() === name);
   return v ? v[1] : '';
 }
 
 function setSetting_(name, value) {
+  forget_('settings');
   const sh = sheet_('settings');
   const last = lastDataRow_(sh);
   const vals = last > 1 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];

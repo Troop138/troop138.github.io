@@ -103,13 +103,23 @@ function applyData(d) {
     S.scouts = new Map(d.scouts.map(s => [s.id, s]));
     S.log = d.log; S.charges = d.charges; S.leaders = d.leaders || [];
     S.returned = new Set(S.log.filter(l => l.kind === 'return' && l.returns).map(l => l.returns));
-    const m = new Map(); for (const l of S.log) m.set(l.itemId, (m.get(l.itemId) || 0) + l.delta); S.qty = m;
+    recount();
     S.error = ''; S.ready = true;
 }
 async function refresh() {
   try { applyData(await api('getData')); }
   catch (e) { if (e.code !== 'unauthorized') S.error = e.message; else return; }
   S.ready = true; soon();
+}
+function recount() { const m = new Map(); for (const l of S.log) m.set(l.itemId, (m.get(l.itemId) || 0) + l.delta); S.qty = m; }
+/** Remove log entries: update the screen right away, then save; on failure reload and say so. */
+async function removeEntries(ids, msg) {
+  const set = new Set(ids), before = S.log, beforeCh = S.charges;
+  S.log = S.log.filter(l => !set.has(l.id)); S.charges = S.charges.filter(c => !set.has(c.logId)); recount();
+  S.pending = (S.pending || 0) + 1; render(); toast('Removing…');
+  try { await send('undo', { logIds: ids }); toast(msg); }
+  catch (e) { S.log = before; S.charges = beforeCh; recount(); fail(e); }
+  finally { S.pending--; soon(); }
 }
 /** Send a change; the reply carries the updated closet, so one round trip is enough. */
 async function send(action, args) {
@@ -481,12 +491,19 @@ function viewRestock() {
   const confirm = async () => {
     const n = cartCount(r.cart);
     const lines = Object.entries(r.cart).map(([itemId, l]) => ({ itemId, qty: l.n, price: l.price != null && l.price !== '' ? Number(l.price) : undefined }));
+    const cart = r.cart, note = r.note;
+    lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) + l.qty));
+    r.cart = {}; r.note = ''; S.q = ''; S.pending = (S.pending || 0) + 1; renderToolbar(); render();
+    toast(`Saving ${n} item${n > 1 ? 's' : ''}…`);
     try {
-      const res = await write('restock', { lines, note: r.note.trim() });
+      const res = await send('restock', { lines, note: note.trim() });
       const undo = async () => { try { await write('undo', { logIds: res.logIds }, 'Undone'); } catch (e) { fail(e); } };
       toast(`Added ${n} item${n > 1 ? 's' : ''} to stock` + (res.priceChanges && res.priceChanges.length ? ` · new price for ${res.priceChanges.join(', ')}` : ''), undo);
-      r.cart = {}; r.note = ''; S.q = ''; renderToolbar(); render();
-    } catch (e) { fail(e); }
+    } catch (e) {
+      lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) - l.qty));
+      if (!cartCount(r.cart)) { r.cart = cart; r.note = note; renderToolbar(); }
+      toast(`Not saved: ${(e && e.message) || "couldn't reach the closet"} Your items are still in the list.`);
+    } finally { S.pending--; soon(); }
   };
   summaryHook = () => {
     const n = cartCount(r.cart);
@@ -905,7 +922,7 @@ function viewHistory(v) {
     const main = el('div', { class: 'main' }, el('div', { class: 'name', text: (it ? it.name : l.itemName) + ((sc || l.scoutName) ? ' → ' + (sc ? sc.name : l.scoutName) : '') }),
       el('div', { class: 'sub' }, el('span', { text: fmtTime(l.at) }), l.kind === 'count' ? el('span', { text: 'Count fix' }) : null, l.note ? el('span', { text: '· ' + l.note }) : null, el('span', { text: '· ' + leaderName(l.by) })));
     const right = !canUndo ? null : S.pendingDel === l.id
-      ? el('div', { class: 'confirm' }, el('button', { class: 'btn small danger', type: 'button', onclick: () => { S.pendingDel = null; save('undo', { logIds: [l.id] }, 'Entry removed. Stock updated.'); } }, 'Remove'),
+      ? el('div', { class: 'confirm' }, el('button', { class: 'btn small danger', type: 'button', onclick: () => { S.pendingDel = null; removeEntries([l.id], 'Entry removed. Stock updated.'); } }, 'Remove'),
         el('button', { class: 'btn small', type: 'button', onclick: () => { S.pendingDel = null; render(); } }, 'Keep'))
       : el('button', { class: 'btn small', type: 'button', 'aria-label': 'Remove this entry', onclick: () => { S.pendingDel = l.id; render(); } }, '✕');
     list.append(el('div', { class: 'row' }, el('div', { class: 'delta ' + l.kind, text: (l.delta > 0 ? '+' : '') + l.delta }), main, right));
