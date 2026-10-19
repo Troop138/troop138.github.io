@@ -880,13 +880,13 @@ function viewHistory(v) {
 
 function viewShare(v) {
   const url = location.origin + location.pathname;
-  const qrSvg = () => { const q = window.qrcode(0, 'M'); q.addData(url); q.make(); return el('div', { html: q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }), style: 'background:#fff;padding:12px;border-radius:12px;max-width:280px;margin:0 auto' }); };
+  const qrSvg = poster => { const q = window.qrcode(0, 'M'); q.addData(url); q.make(); return el('div', { html: q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }), style: poster ? 'width:4.5in;height:4.5in;margin:0 auto' : 'background:#fff;padding:12px;border-radius:12px;max-width:280px;margin:0 auto' }); };
   const urlBox = el('input', { id: 'shareurl', class: 'search', value: url, readonly: true });
   v.append(el('h2', { style: 'margin-top:12px', text: 'Share the app' }),
     el('div', { class: 'card stack', style: 'margin-top:12px;text-align:center' }, qrSvg(),
       el('p', { class: 'mini muted', style: 'margin:0', text: 'Leaders scan this with their phone camera, sign in with Google, then add the app to their home screen. Only people on the leader list can get in.' }),
       el('div', { class: 'searchrow' }, urlBox, el('button', { class: 'btn', type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch (e) { urlBox.select(); } } }, 'Copy')),
-      el('button', { class: 'btn', type: 'button', onclick: () => printNode(el('div', { class: 'poster' }, el('h2', { text: S.settings.appTitle || 'Troop Closet' }), qrSvg(), el('p', { text: 'Scan to open. Leaders sign in with Google.' }), el('p', { text: url }))) }, 'Print a QR poster')),
+      el('button', { class: 'btn', type: 'button', onclick: () => printNode(el('div', { class: 'poster' }, el('h2', { text: S.settings.appTitle || 'Troop Closet' }), qrSvg(true), el('p', { text: 'Scan to open. Leaders sign in with Google.' }), el('p', { text: url }))) }, 'Print a QR poster')),
     el('div', { class: 'card stack', style: 'margin-top:12px' }, el('h3', { text: 'Add to home screen' }),
       el('p', { class: 'mini', style: 'margin:0', text: 'iPhone: open the link in Safari, tap Share, then Add to Home Screen.' }),
       el('p', { class: 'mini', style: 'margin:0', text: 'Android: open the link in Chrome, tap ⋮, then Add to Home screen (or Install app).' })));

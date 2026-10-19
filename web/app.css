@@ -196,9 +196,9 @@ table.report tr.grouprow td{background:var(--accent-soft);color:var(--accent);fo
   #printroot .tablewrap{border:0;overflow:visible}
 }
 #printroot h2{color:#000;margin-bottom:4px}
-.poster{text-align:center;color:#000;padding-top:1in}
+.poster{text-align:center;color:#000;padding-top:1in;display:flex;flex-direction:column;align-items:center}
 .poster h2{font-size:28pt}
-.poster svg{width:4.5in;height:4.5in}
+.poster svg{width:4.5in;height:4.5in;display:block;margin:0 auto}
 
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
 .eaglereq{margin-left:6px;font-size:.95em}
