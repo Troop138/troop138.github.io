@@ -121,8 +121,8 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 
 ## Check back in
 
-- Every give-out on a scout's page has a **Check back in** button. It puts the item back in stock and waives any pending charge.
-- **Reports → Check back in** lists everything given out in the last year, grouped by day and scout. Tick the items nobody picked up and check them back in. Leaders and admins can do this; treasurers can't.
+- Admins see a **Check back in** button on every give-out on a scout's page. It puts the item back in stock and waives any pending charge.
+- **Reports → Check back in** lists everything given out in the last year, grouped by day and scout. Tick the items nobody picked up and check them back in. Only admins (the advancement team) can check items back in.
 - Court of honor give-outs are entered in bulk straight into the Log (and Charges for items that cost money), outside the app.
 
 ## Editing the sheet by hand

@@ -481,11 +481,12 @@ function giveOne_(me, ctx, scout, itemId, qty, note, waiveReason) {
 /* ---------- check back in ---------- */
 
 /**
- * Check given-out items back in to stock (e.g. envelopes nobody picked up). Any leader.
+ * Check given-out items back in to stock (e.g. envelopes nobody picked up). Admins (the advancement team) only.
  * args: { logIds: [give-out log IDs], note }
  * Logs a 'return' against the same scout and waives any pending charge for that give-out.
  */
 function checkIn_(me, a) {
+  need_(me, ['Admin']); // the advancement team checks items back in
   const ids = new Set((a.logIds || []).map(String));
   if (!ids.size) return { returned: 0 };
   const log = readTable_('log');

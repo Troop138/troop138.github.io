@@ -595,7 +595,7 @@ const REPORTS = [
   ['scout', 'Scout history', 'Everything one scout has received', null],
   ['charges', 'Charges', 'Money owed, and what was transferred to the treasurer', null],
   ['shrink', 'Shelf count fixes', 'Corrections from shelf counts', null],
-  ['returns', 'Check back in', 'Put items nobody picked up back in stock', null],
+  ['returns', 'Check back in', 'Put items nobody picked up back in stock', ['Admin']],
 ];
 function viewReports() {
   setAction(null); if (loading()) return;
@@ -853,7 +853,7 @@ function scoutSheet(id) {
       })() : null,
       el('div', {}, el('h3', { text: `Received (${recv.filter(l => !S.returned.has(l.id)).reduce((a, l) => a - l.delta, 0)})` }), recv.length ? recv.map(l => {
         const it = S.items.get(l.itemId), c = ch.find(x => x.logId === l.id), back = S.returned.has(l.id);
-        const canReturn = !back && !(c && c.status === 'Transferred to Treasurer');
+        const canReturn = isRole('Admin') && !back && !(c && c.status === 'Transferred to Treasurer');
         return el('div', { class: 'row', style: 'min-height:44px' }, el('div', { class: 'main' }, el('div', { class: 'name' + (back ? ' muted' : ''), text: (it ? it.name : l.itemName) + (l.delta < -1 ? ` ×${-l.delta}` : '') }),
           el('div', { class: 'sub' }, el('span', { text: fmtDate(l.at) }), back ? el('span', { class: 'pill', text: 'Checked back in' }) : null, c && !back ? el('span', { class: 'pill ' + c.status.toLowerCase().replace(/\s+/g, '-'), text: `${c.status} ${money(c.amount)}` }) : null)),
           canReturn ? el('button', { class: 'btn small', type: 'button', onclick: () => save('checkIn', { logIds: [l.id] }, `${it ? it.name : l.itemName} checked back in`) }, 'Check back in') : null);
@@ -911,7 +911,7 @@ function viewAdmin(v) {
     el('div', { class: 'main' }, el('div', { class: 'name' + (l.active ? '' : ' muted'), text: l.name || l.email }), el('div', { class: 'sub' }, el('span', { text: l.email }), l.active ? null : el('span', { text: '· removed' }))),
     el('span', { class: 'pill' + (l.role === 'Admin' ? ' eagle' : l.role === 'Treasurer' ? ' pending' : ''), text: l.role }))));
   v.append(el('h2', { style: 'margin-top:12px', text: 'Leaders & access' }),
-    el('p', { class: 'mini muted', text: 'People sign in with the Google account listed here. Leader: give out, restock, check back in, reports, and see charges. Treasurer: also marks charges transferred or waived. Admin: everything, including items, costs and this list.' }),
+    el('p', { class: 'mini muted', text: 'People sign in with the Google account listed here. Leader: give out, restock, reports, and see charges. Treasurer: also marks charges transferred or waived. Admin: everything, including items, costs and this list.' }),
     el('button', { class: 'btn primary', type: 'button', onclick: () => leaderSheet('') }, '+ Add a leader'), list);
 }
 function leaderSheet(email) {

@@ -162,7 +162,7 @@ test('undo is blocked once a charge is transferred', () => {
 test('leaders can undo their own fresh entries, not others', () => {
   const r = ok(api(lee, 'restock', { lines: [{ itemId: 'i1', qty: 1 }] }));
   assert.strictEqual(api(tess, 'undo', { logIds: r.logIds }).code, 'forbidden');
-  ok(api(lee, 'undo', { logIds: r.logIds }));
+  ok(api(admin, 'undo', { logIds: r.logIds }));
 });
 
 // --- check back in
@@ -172,15 +172,16 @@ test('check back in: back to stock, waives the charge, once', () => {
   const g = ok(api(admin, 'give', { scoutId, lines: [{ itemId: 'i3', qty: 1 }] }));
   const logId = g.logIds[0], before = onHand('i3');
   assert.strictEqual(ok(api(admin, 'getData')).charges.find(c => c.logId === logId).status, 'Pending');
-  const r = ok(api(lee, 'checkIn', { logIds: [logId] }));
+  assert.strictEqual(api(lee, 'checkIn', { logIds: [logId] }).code, 'forbidden', 'leaders cannot check back in');
+  const r = ok(api(admin, 'checkIn', { logIds: [logId] }));
   assert.strictEqual(r.returned, 1);
-  assert.strictEqual(ok(api(lee, 'checkIn', { logIds: [logId] })).returned, 0, 'checked in twice');
+  assert.strictEqual(ok(api(admin, 'checkIn', { logIds: [logId] })).returned, 0, 'checked in twice');
   assert.strictEqual(onHand('i3'), before + 1);
   let d = ok(api(lee, 'getData'));
   const c = d.charges.find(x => x.logId === logId); assert.strictEqual(c.status, 'Waived'); assert.strictEqual(c.reason, 'Checked back in');
   const ret = d.log.find(l => l.kind === 'return'); assert.strictEqual(ret.scoutId, scoutId); assert.strictEqual(ret.returns, logId);
   // undo the check-in: charge back to pending
-  ok(api(lee, 'undo', { logIds: r.logIds }));
+  ok(api(admin, 'undo', { logIds: r.logIds }));
   d = ok(api(lee, 'getData'));
   assert.strictEqual(d.charges.find(x => x.logId === logId).status, 'Pending');
   assert.strictEqual(onHand('i3'), before);
