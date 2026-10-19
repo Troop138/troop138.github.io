@@ -26,7 +26,7 @@
       });
       const scouts = ss.getSheetByName('Scouts');
       [['Sample Scout A', 'Panthers'], ['Sample Scout B', 'Panthers'], ['Sample Scout C', 'Hawks'], ['Sample Scout D', 'Hawks']]
-        .forEach(([n, p], i) => { const [f, ...l] = n.split(' '); scouts.appendRow(['s' + i, f, l.join(' '), p, true]); });
+        .forEach(([n, p], i) => { const [f, ...l] = n.split(' '); scouts.appendRow(['s' + i, f, l.join(' '), true]); });
 
       // A little history so the reports have something to show.
       const tok = this.login('demo.admin@example.com');

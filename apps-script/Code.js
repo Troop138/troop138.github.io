@@ -19,7 +19,7 @@ const TABS = {
   settings: { name: 'Settings', headers: ['Setting', 'Value', 'Notes'] },
   leaders:  { name: 'Leaders',  headers: ['Email', 'Name', 'Role', 'Active'] },
   items:    { name: 'Items',    headers: ['ID', 'Name', 'Category', 'Cost', 'Charge rule', 'Reorder at', 'Stock to', 'Active', 'Eagle required'] },
-  scouts:   { name: 'Scouts',   headers: ['ID', 'First name', 'Last name', 'Patrol', 'Active', 'Needs roster update', 'Added by', 'Added on'] },
+  scouts:   { name: 'Scouts',   headers: ['ID', 'First name', 'Last name', 'Active', 'Needs roster update', 'Added by', 'Added on'] },
   log:      { name: 'Log',      headers: ['ID', 'When', 'Item ID', 'Item', 'Change', 'Type', 'Scout ID', 'Scout', 'Note', 'Logged by', 'Unit cost', 'Returns'] },
   charges:  { name: 'Charges',  headers: ['ID', 'When', 'Scout ID', 'Scout', 'Item ID', 'Item', 'Qty', 'Amount', 'Status', 'Reason', 'Log ID', 'Created by', 'Status changed', 'Status changed by'] },
 };
@@ -378,7 +378,7 @@ function need_(me, roles) {
 function getData_(me) {
   const items = readTable_('items').filter(r => r['ID']).map(itemOut_);
   const scouts = readTable_('scouts').filter(r => r['ID']).map(r => ({
-    id: String(r['ID']), name: scoutName_(r), first: String(r['First name'] || ''), last: String(r['Last name'] || ''), patrol: String(r['Patrol'] || ''), active: r['Active'] !== false,
+    id: String(r['ID']), name: scoutName_(r), first: String(r['First name'] || ''), last: String(r['Last name'] || ''), active: r['Active'] !== false,
     needsUpdate: r['Needs roster update'] === true || String(r['Needs roster update']).toUpperCase() === 'TRUE',
     addedBy: String(r['Added by'] || ''), addedAt: time_(r['Added on']),
   }));
@@ -555,7 +555,7 @@ function undo_(me, a) {
 }
 
 /**
- * Any leader can add a scout with first name, last name and patrol. Scouts
+ * Any leader can add a scout with first and last name. Scouts
  * added by someone other than an admin are flagged "Needs roster update" and
  * the admins get an email, so the rest of the scout's details get updated.
  */
@@ -568,12 +568,12 @@ function addScout_(me, a) {
     ? `${name} is already on the roster but archived. Ask the closet admin to restore them.`
     : `${name} is already on the roster.`);
   const flag = me.role !== 'Admin';
-  const row = { 'ID': id_(), 'First name': first, 'Last name': last, 'Patrol': String(a.patrol || '').trim().slice(0, 60),
+  const row = { 'ID': id_(), 'First name': first, 'Last name': last,
     'Active': true, 'Needs roster update': flag, 'Added by': me.email, 'Added on': new Date() };
   appendRows_('scouts', [row]);
   if (flag) notifyAdmins_(`New scout added: ${name}`,
     `${me.name} (${me.email}) added a scout to the closet:\n\n` +
-    `  ${name}${row['Patrol'] ? ' (' + row['Patrol'] + ')' : ''}\n\n` +
+    `  ${name}\n\n` +
     `Update their details on the troop roster, then mark them updated in the app: More > Scouts.\n`);
   return { id: row['ID'], needsUpdate: flag };
 }
@@ -598,7 +598,6 @@ function updateScout_(me, a) {
     if (!first || !last) throw apiError_('bad_request', "Enter the scout's first and last name.");
     Object.assign(patch, { 'First name': first, 'Last name': last });
   }
-  if ('patrol' in a) patch['Patrol'] = String(a.patrol).trim().slice(0, 60);
   if ('active' in a) patch['Active'] = !!a.active;
   if ('updated' in a) patch['Needs roster update'] = !a.updated;
   updateRow_('scouts', s._row, patch);

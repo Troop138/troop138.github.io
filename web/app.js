@@ -370,10 +370,10 @@ function viewGive() {
     setAction(null); summaryHook = null;
     v.append(el('p', { class: 'muted mini', style: 'margin:12px 2px 0', text: 'Step 1 of 2 · Pick the scout receiving items' }));
     const q = S.scoutQ.trim().toLowerCase();
-    const sc = activeScouts().filter(s => !q || s.name.toLowerCase().includes(q) || s.patrol.toLowerCase().includes(q));
+    const sc = activeScouts().filter(s => !q || s.name.toLowerCase().includes(q));
     const list = el('div', { class: 'list' });
     for (const s of sc) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => pickScout(s.id) },
-      el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), s.patrol ? el('div', { class: 'sub', text: s.patrol }) : null), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
+      el('div', { class: 'main' }, el('div', { class: 'name', text: s.name })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
     if (!activeScouts().length) list.append(el('div', { class: 'empty' }, el('strong', { text: 'No scouts yet' }), el('span', { text: 'Add the first scout below.' })));
     else if (!sc.length) list.append(el('div', { class: 'empty', text: 'No scout by that name. New to the troop? Add them below.' }));
     v.append(list, addScoutButton(S.scoutQ, id => pickScout(id)));
@@ -416,21 +416,11 @@ function addScoutButton(prefill, then) {
   return el('div', { style: 'display:flex;justify-content:center;padding-top:16px' },
     el('button', { class: 'btn', type: 'button', onclick: () => scoutForm(prefill, then) }, '+ Add a scout'));
 }
-function patrols() { return [...new Set(activeScouts().map(s => s.patrol).filter(Boolean))].sort((a, b) => a.localeCompare(b)); }
-function patrolPicker(current) {
-  const list = patrols();
-  const sel = el('select', { id: 'fpatrol' }, el('option', { value: '', text: 'No patrol' }), list.map(p => el('option', { value: p, text: p })), el('option', { value: '__new', text: 'New patrol…' }));
-  const other = el('input', { id: 'fpatrolnew', placeholder: 'Patrol name', autocomplete: 'off', hidden: true });
-  if (current && !list.includes(current)) { sel.value = '__new'; other.value = current; other.hidden = false; } else sel.value = current || '';
-  sel.onchange = () => { other.hidden = sel.value !== '__new'; if (!other.hidden) other.focus(); };
-  return { node: el('div', { class: 'field' }, el('label', { for: 'fpatrol', text: 'Patrol' }), sel, other), value: () => sel.value === '__new' ? other.value.trim() : sel.value };
-}
 function scoutForm(prefill, then) {
   const parts = String(prefill || '').trim().split(/\s+/).filter(Boolean);
   openSheet(() => {
     const first = el('input', { id: 'ffirst', value: parts[0] || '', autocomplete: 'off', autocapitalize: 'words' });
     const last = el('input', { id: 'flast', value: parts.slice(1).join(' '), autocomplete: 'off', autocapitalize: 'words' });
-    const pp = patrolPicker('');
     const btn = el('button', { class: 'btn primary', type: 'submit' }, 'Add scout');
     return el('form', { style: 'display:contents', onsubmit: async e => {
       e.preventDefault();
@@ -439,14 +429,13 @@ function scoutForm(prefill, then) {
       btn.disabled = true;
       try {
         const nm = `${first.value.trim()} ${last.value.trim()}`;
-        const r = await write('addScout', { first: first.value, last: last.value, patrol: pp.value() });
+        const r = await write('addScout', { first: first.value, last: last.value });
         toast(r.needsUpdate ? `Added ${nm}. The closet admin has been asked to finish their roster details.` : `Added ${nm}`);
         closeSheet(); S.scoutQ = ''; if (then) then(r.id); else render();
       } catch (er) { fail(er); btn.disabled = false; }
     } },
       sheetHead('Add a scout'),
       el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'ffirst', text: 'First name' }), first), el('div', { class: 'field' }, el('label', { for: 'flast', text: 'Last name' }), last)),
-      pp.node,
       isRole('Admin') ? null : el('p', { class: 'mini muted', style: 'margin:0', text: "The closet admin gets a notice to add this scout's other details to the troop roster." }),
       btn);
   });
@@ -812,15 +801,15 @@ function viewScouts(v) {
   const list = el('div', { class: 'list' }), sc = activeScouts();
   if (!sc.length) list.append(el('div', { class: 'empty' }, el('strong', { text: 'No scouts yet' }), el('span', { text: 'Add scouts here or while giving out items.' })));
   for (const s of sc) list.append(el('button', { type: 'button', class: 'row tap', onclick: () => scoutSheet(s.id) },
-    el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: [s.patrol, `${got.get(s.id) || 0} items received`].filter(Boolean).join(' · ') })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
+    el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: `${got.get(s.id) || 0} items received` })), el('span', { class: 'muted', 'aria-hidden': 'true', text: '›' })));
   const review = isRole('Admin') ? [...S.scouts.values()].filter(s => s.needsUpdate).sort(byName) : [];
   v.append(el('h2', { style: 'margin-top:12px', text: 'Scouts' }));
   if (review.length) {
     v.append(el('div', { class: 'card stack', style: 'margin-top:12px;border-color:var(--warn-fg)' },
       el('h3', { style: 'color:var(--warn-fg)', text: `Needs roster update (${review.length})` }),
-      el('p', { class: 'mini muted', style: 'margin:0', text: "Leaders added these scouts with just a name and patrol. Update their details on the troop roster, then mark them updated." }),
+      el('p', { class: 'mini muted', style: 'margin:0', text: "Leaders added these scouts with just a name. Update their details on the troop roster, then mark them updated." }),
       review.map(s => el('div', { class: 'row', style: 'min-height:52px' },
-        el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: [s.patrol, `added by ${leaderName(s.addedBy)}`, s.addedAt ? fmtDate(s.addedAt) : ''].filter(Boolean).join(' · ') })),
+        el('div', { class: 'main' }, el('div', { class: 'name', text: s.name }), el('div', { class: 'sub', text: [`added by ${leaderName(s.addedBy)}`, s.addedAt ? fmtDate(s.addedAt) : ''].filter(Boolean).join(' · ') })),
         el('button', { class: 'btn small', type: 'button', onclick: () => save('updateScout', { id: s.id, updated: true }, `${s.name} marked updated`) }, 'Mark updated')))));
   }
   v.append(addScoutButton(''), list);
@@ -832,11 +821,10 @@ function scoutSheet(id) {
     const s = S.scouts.get(id); if (!s) return null;
     const nameParts = s.name.split(/\s+/);
     const first = el('input', { id: 'ffirst', value: s.first || nameParts[0] || '', autocomplete: 'off' }), last = el('input', { id: 'flast', value: s.last || nameParts.slice(1).join(' '), autocomplete: 'off' });
-    const pp = patrolPicker(s.patrol);
     const recv = S.log.filter(l => l.scoutId === id && l.kind === 'out').sort((a, b) => b.at - a.at);
     const ch = S.charges.filter(c => c.scoutId === id), pend = ch.filter(c => c.status === 'Pending').reduce((a, c) => a + c.amount, 0);
     return el('div', { style: 'display:contents' },
-      sheetHead(s.name, [s.patrol, isRole('Admin', 'Treasurer') && pend ? `${money(pend)} pending charges` : ''].filter(Boolean).join(' · ')),
+      sheetHead(s.name, [isRole('Admin', 'Treasurer') && pend ? `${money(pend)} pending charges` : ''].filter(Boolean).join(' · ')),
       el('button', { class: 'btn primary', type: 'button', disabled: !s.active, onclick: () => { closeSheet(); S.give.scoutId = id; S.give.cart = {}; S.tab = 'give'; S.q = ''; render(true); } }, `Give items to ${s.name}`),
       el('div', {}, el('h3', { text: `Received (${recv.filter(l => !S.returned.has(l.id)).reduce((a, l) => a - l.delta, 0)})` }), recv.length ? recv.map(l => {
         const it = S.items.get(l.itemId), c = ch.find(x => x.logId === l.id), back = S.returned.has(l.id);
@@ -848,10 +836,9 @@ function scoutSheet(id) {
       s.needsUpdate && isRole('Admin') ? el('div', { class: 'card stack', style: 'border-color:var(--warn-fg)' },
         el('div', { class: 'mini', text: `Added by ${leaderName(s.addedBy)}${s.addedAt ? ' on ' + fmtDate(s.addedAt) : ''}. Their roster details still need updating.` }),
         el('button', { class: 'btn', type: 'button', onclick: () => save('updateScout', { id, updated: true }, `${s.name} marked updated`) }, 'Mark roster updated')) : null,
-      isRole('Admin') ? el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); if (!first.value.trim()) return first.focus(); if (!last.value.trim()) return last.focus(); save('updateScout', { id, first: first.value, last: last.value, patrol: pp.value() }, 'Saved'); } },
+      isRole('Admin') ? el('form', { class: 'stack', onsubmit: e => { e.preventDefault(); if (!first.value.trim()) return first.focus(); if (!last.value.trim()) return last.focus(); save('updateScout', { id, first: first.value, last: last.value }, 'Saved'); } },
         el('h3', { text: 'Edit scout' }),
         el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'ffirst', text: 'First name' }), first), el('div', { class: 'field' }, el('label', { for: 'flast', text: 'Last name' }), last)),
-        pp.node,
         el('div', { class: 'rowbtns' }, el('button', { class: 'btn', type: 'submit' }, 'Save'),
           el('button', { class: 'btn danger', type: 'button', onclick: () => save('updateScout', { id, active: !s.active }, s.active ? `${s.name} archived. History is kept.` : `${s.name} restored`, closeSheet) }, s.active ? 'Archive scout' : 'Restore scout'))) : null);
   });
@@ -922,7 +909,6 @@ function leaderSheet(email) {
 /* ---------- Check back in ---------- */
 function groupBy(list, fn) { const m = new Map(); list.forEach(x => { const k = fn(x); m.set(k, (m.get(k) || []).concat(x)); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]))); }
 const dayKey = t => new Date(t).toDateString();
-function patrolOf(a) { const s = S.scouts.get(a.scoutId); return (s && s.patrol) || ''; }
 const scoutNameOf = l => (S.scouts.get(l.scoutId) || {}).name || l.scoutName;
 const itemNameOf = l => (S.items.get(l.itemId) || {}).name || l.itemName;
 
@@ -945,9 +931,8 @@ function retEnvelopes() {
   const sel = R.sel, ids = list.filter(l => sel[l.id]).map(l => l.id);
   const done = () => { R.sel = {}; render(); };
   const sec = el('div', { class: 'stack', style: 'gap:12px' }); wrap.append(sec);
-  for (const [patrol, pl] of groupBy(list, patrolOf)) {
-    sec.append(el('div', { class: 'group-h', text: patrol || 'No patrol' }));
-    for (const [name, items] of groupBy(pl, scoutNameOf)) {
+  {
+    for (const [name, items] of groupBy(list, scoutNameOf)) {
       const all = items.every(l => sel[l.id]);
       sec.append(el('div', { class: 'card', style: 'padding:6px 12px' }, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:6px' },
         el('strong', { text: name }), el('button', { class: 'linkbtn', type: 'button', onclick: () => { items.forEach(l => { sel[l.id] = !all; }); render(); } }, all ? 'Clear' : 'Select all')),

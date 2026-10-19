@@ -33,7 +33,7 @@ Roles, set on the **Leaders** tab:
 
 | Role | Can |
 |---|---|
-| Leader | Give out, restock, shelf counts, add scouts (first name, last name, patrol), reports. Undo their own entries for 24 hours. |
+| Leader | Give out, restock, shelf counts, add scouts (first and last name), reports. Undo their own entries for 24 hours. |
 | Treasurer | Everything a leader can, plus mark charges Transferred to Treasurer or Waived. |
 | Admin | Everything, plus items, costs, charge rules, leaders, and removing any entry. |
 
@@ -122,7 +122,7 @@ From the command line instead: `clasp push`, then `clasp redeploy <deploymentId>
 ## Check back in
 
 - Every give-out on a scout's page has a **Check back in** button. It puts the item back in stock and waives any pending charge.
-- **Reports → Check back in** lists everything given out in the last year, grouped by day, patrol and scout. Tick the items nobody picked up and check them back in. Leaders and admins can do this; treasurers can't.
+- **Reports → Check back in** lists everything given out in the last year, grouped by day and scout. Tick the items nobody picked up and check them back in. Leaders and admins can do this; treasurers can't.
 - Court of honor give-outs are entered in bulk straight into the Log (and Charges for items that cost money), outside the app.
 
 ## Editing the sheet by hand
@@ -132,7 +132,7 @@ The app reads columns by header name, so you can reorder columns, but don't rena
 | Tab | Safe to edit | Leave alone |
 |---|---|---|
 | Items | Name, Category, Cost, Charge rule, Reorder at, Stock to, Active | ID |
-| Scouts | Name, Patrol, Active | ID |
+| Scouts | First name, Last name, Active | ID |
 | Leaders | Everything (this is how you manage access) | |
 | Charges | Status (dropdown). The date and who changed it are filled in automatically. | ID, Amount |
 | Settings | Values in the Value column | Setting names |

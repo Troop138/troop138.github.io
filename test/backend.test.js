@@ -26,7 +26,7 @@ items.appendRow(['i3', 'Merit badge sash', 'Award & card', 7.99, 'Always charge'
 
 // Checkbox columns hold FALSE on empty rows in a real sheet. Reproduce that so
 // appends land right under the data, not below the checkboxes.
-[['Leaders', 3], ['Items', 7], ['Scouts', 4]].forEach(([tab, col]) => {
+[['Leaders', 3], ['Items', 7], ['Scouts', 3]].forEach(([tab, col]) => {
   const s = env.ss.getSheetByName(tab);
   for (let r = s.data.length + 1; r <= 40; r++) s.set(r, col + 1, false);
 });
@@ -85,7 +85,7 @@ test('leaders do not get the leader list or sheet link', () => {
 // --- stock + charges
 let scoutId;
 test('leader adds a scout; it is flagged and admins get an email', () => {
-  const r = ok(api(lee, 'addScout', { first: 'Sam', last: 'Rivera', patrol: 'Eagles' }));
+  const r = ok(api(lee, 'addScout', { first: 'Sam', last: 'Rivera' }));
   scoutId = r.id;
   assert.strictEqual(r.needsUpdate, true);
   const s = ok(api(admin, 'getData')).scouts.find(x => x.id === scoutId);
@@ -100,7 +100,7 @@ test('first and last name are both required, and duplicates are refused', () => 
 });
 test('scouts an admin adds are not flagged and send no email', () => {
   const before = ctx.sentMail.length;
-  const r = ok(api(admin, 'addScout', { first: 'Jo', last: 'Lee', patrol: '' }));
+  const r = ok(api(admin, 'addScout', { first: 'Jo', last: 'Lee' }));
   assert.strictEqual(r.needsUpdate, false); assert.strictEqual(ctx.sentMail.length, before);
 });
 test('only admins edit scouts or mark them updated', () => {
@@ -185,7 +185,7 @@ test('check back in: back to stock, waives the charge, once', () => {
   assert.strictEqual(onHand('i3'), before);
 });
 test('first-one-free: a checked-in item does not use up the free one', () => {
-  const s2 = ok(api(admin, 'addScout', { first: 'Free', last: 'Test', patrol: 'Cobras' })).id;
+  const s2 = ok(api(admin, 'addScout', { first: 'Free', last: 'Test' })).id;
   const g = ok(api(admin, 'give', { scoutId: s2, lines: [{ itemId: 'i2', qty: 1 }] }));
   assert.strictEqual(g.charged, 0);
   ok(api(admin, 'checkIn', { logIds: g.logIds }));
