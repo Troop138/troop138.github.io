@@ -223,4 +223,29 @@ test('signOutEverywhere revokes all sessions for that person', () => {
   assert.strictEqual(api(t2, 'getData').code, 'unauthorized');
 });
 
+test('No sign-in leaders: added by name without email, listed, and cannot sign in', () => {
+  ok(api(admin, 'saveLeader', { email: '', name: 'Pat Doe', role: 'No sign-in', active: true }));
+  ok(api(admin, 'saveLeader', { email: 'sam@example.com', name: 'Sam Roe', role: 'No sign-in', active: true }));
+  // A row with only a name is still a data row: the next add lands below it, not on top of it.
+  ok(api(admin, 'saveLeader', { email: 'new@example.com', name: 'Newt', role: 'Leader', active: true }));
+  const d = ok(api(admin, 'getData'));
+  const pat = d.leaders.find(l => l.name === 'Pat Doe');
+  assert.ok(pat, 'name-only leader is listed'); assert.strictEqual(pat.role, 'No sign-in'); assert.strictEqual(pat.email, '');
+  assert.ok(d.leaders.find(l => l.email === 'new@example.com'));
+  ctx.tokeninfo = { aud: 'client-123', iss: 'https://accounts.google.com', email: 'sam@example.com', email_verified: 'true', exp: String(Math.floor(Date.now() / 1000) + 3600) };
+  assert.strictEqual(call('login', { idToken: 'x' }).code, 'not_a_leader', 'No sign-in with an email still cannot sign in');
+  assert.strictEqual(api(admin, 'saveLeader', { email: '', name: '', role: 'No sign-in' }).code, 'bad_request', 'name required');
+  assert.strictEqual(api(admin, 'saveLeader', { email: '', name: 'pat doe', role: 'No sign-in', origEmail: '', origName: '' }).code, 'conflict', 'duplicate names rejected');
+  // Edit the name-only row by its original name.
+  ok(api(admin, 'saveLeader', { email: '', name: 'Pat Doe-Smith', role: 'No sign-in', active: true, origEmail: '', origName: 'Pat Doe' }));
+  const d2 = ok(api(admin, 'getData'));
+  assert.ok(d2.leaders.find(l => l.name === 'Pat Doe-Smith')); assert.ok(!d2.leaders.find(l => l.name === 'Pat Doe'));
+});
+test('changing a signed-in leader to No sign-in signs them out', () => {
+  const t = login('new@example.com');
+  ok(api(t, 'getData'));
+  ok(api(admin, 'saveLeader', { email: 'new@example.com', name: 'Newt', role: 'No sign-in', active: true, origEmail: 'new@example.com' }));
+  assert.strictEqual(api(t, 'getData').code, 'unauthorized');
+});
+
 console.log(`\n${passed} passed`);

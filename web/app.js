@@ -12,7 +12,7 @@ const CAT_SHORT = { 'Rank': 'Ranks', 'Patrol patch': 'Patrol patches', 'Merit ba
 // Eagle-required merit badges get a small eagle next to their name.
 const nameEl = (it, cls) => el('div', { class: 'name' + (cls ? ' ' + cls : '') }, it.name, it.eagleReq ? el('span', { class: 'eaglereq', title: 'Eagle required', 'aria-label': 'Eagle required', text: '🦅' }) : null);
 const RULES = ['Free', 'Always charge', 'First one free'];
-const ROLES = ['Admin', 'Leader', 'Treasurer'];
+const ROLES = ['Admin', 'Leader', 'Treasurer', 'No sign-in'];
 
 const S = {
   token: '', me: null, settings: { appTitle: 'Troop Closet', troopName: '' }, sheetUrl: '',
@@ -54,7 +54,7 @@ const activeScouts = () => [...S.scouts.values()].filter(s => s.active).sort(byN
 const qtyOf = id => S.qty.get(id) || 0;
 // Reorder at 0 = not kept in stock (bought when a scout needs one): never Low/Out.
 function status(it) { const q = qtyOf(it.id); if (!(it.reorder > 0)) return 'ok'; if (q <= 0) return 'out'; if (q <= it.reorder) return 'low'; return 'ok'; }
-function leaderName(email) { const l = S.leaders.find(x => x.email === email); return (l && l.name) || who(email); }
+function leaderName(email) { const l = email && S.leaders.find(x => x.email === email); return (l && l.name) || who(email); }
 
 const ICONS = {
   stock: '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/>',
@@ -983,27 +983,38 @@ function viewShare(v) {
 function viewAdmin(v) {
   const list = el('div', { class: 'list' });
   const rows = [...S.leaders].sort((a, b) => (b.active - a.active) || ROLES.indexOf(a.role) - ROLES.indexOf(b.role) || (a.name || a.email).localeCompare(b.name || b.email));
-  rows.forEach(l => list.append(el('button', { type: 'button', class: 'row tap', onclick: () => leaderSheet(l.email) },
-    el('div', { class: 'main' }, el('div', { class: 'name' + (l.active ? '' : ' muted'), text: l.name || l.email }), el('div', { class: 'sub' }, el('span', { text: l.email }), l.active ? null : el('span', { text: '· removed' }))),
+  rows.forEach(l => list.append(el('button', { type: 'button', class: 'row tap', onclick: () => leaderSheet(l) },
+    el('div', { class: 'main' }, el('div', { class: 'name' + (l.active ? '' : ' muted'), text: l.name || l.email }), el('div', { class: 'sub' }, el('span', { text: l.email || (l.role === 'No sign-in' ? 'Paper log only' : '') }), l.active ? null : el('span', { text: '· removed' }))),
     el('span', { class: 'pill' + (l.role === 'Admin' ? ' eagle' : l.role === 'Treasurer' ? ' pending' : ''), text: l.role }))));
   v.append(el('h2', { style: 'margin-top:12px', text: 'Leaders & access' }),
-    el('p', { class: 'mini muted', text: 'People sign in with the Google account listed here. Leader: give out, restock, reports, and see charges. Treasurer: also marks charges transferred or waived. Admin: everything, including items, costs and this list.' }),
-    el('button', { class: 'btn primary', type: 'button', onclick: () => leaderSheet('') }, '+ Add a leader'), list);
+    el('p', { class: 'mini muted', text: 'People sign in with the Google account listed here. Leader: give out, restock, reports, and see charges. Treasurer: also marks charges transferred or waived. Admin: everything, including items, costs and this list. No sign-in: can\'t use the app; listed so give-outs on the paper log are credited to them by name.' }),
+    el('button', { class: 'btn primary', type: 'button', onclick: () => leaderSheet(null) }, '+ Add a leader'), list);
 }
-function leaderSheet(email) {
+function leaderSheet(orig) {
   openSheet(() => {
-    const l = S.leaders.find(x => x.email === email) || { email: '', name: '', role: 'Leader', active: true };
-    const em = el('input', { id: 'lemail', type: 'email', value: l.email, placeholder: 'name@gmail.com', autocomplete: 'off', readonly: !!email });
-    const nm = el('input', { id: 'lname', value: l.name, placeholder: 'Name shown in the app', autocomplete: 'off' });
+    const l = orig || { email: '', name: '', role: 'Leader', active: true };
+    const hadEmail = !!(orig && orig.email);
+    const em = el('input', { id: 'lemail', type: 'email', value: l.email, placeholder: 'name@gmail.com', autocomplete: 'off', readonly: hadEmail && l.role !== 'No sign-in' });
+    const nm = el('input', { id: 'lname', value: l.name, placeholder: 'Name as leaders write it', autocomplete: 'off' });
     const role = el('select', { id: 'lrole' }, ROLES.map(r => el('option', { value: r, text: r }))); role.value = l.role;
     const active = el('input', { id: 'lactive', type: 'checkbox', class: 'check' }); active.checked = l.active;
-    return el('form', { style: 'display:contents', onsubmit: e => { e.preventDefault(); save('saveLeader', { email: em.value.trim(), name: nm.value.trim(), role: role.value, active: active.checked }, 'Saved', closeSheet); } },
-      sheetHead(email ? (l.name || l.email) : 'Add a leader'),
-      el('div', { class: 'field' }, el('label', { for: 'lemail', text: 'Google account email' }), em),
+    const emLabel = el('label', { for: 'lemail' }), activeLabel = el('div', { class: 'name' }), activeSub = el('div', { class: 'sub' });
+    const sync = () => {
+      const ns = role.value === 'No sign-in';
+      emLabel.textContent = ns ? 'Email (optional)' : 'Google account email';
+      em.required = !ns; nm.required = ns;
+      em.readOnly = hadEmail && !ns && l.role !== 'No sign-in';
+      activeLabel.textContent = ns ? 'Active' : 'Can sign in';
+      activeSub.textContent = ns ? 'Untick when they are no longer a leader. Past give-outs keep their name.' : 'Untick to remove access. They are signed out everywhere.';
+    };
+    role.addEventListener('change', sync); sync();
+    return el('form', { style: 'display:contents', onsubmit: e => { e.preventDefault(); save('saveLeader', { email: em.value.trim(), name: nm.value.trim(), role: role.value, active: active.checked, origEmail: orig ? orig.email : '', origName: orig ? orig.name : '' }, 'Saved', closeSheet); } },
+      sheetHead(orig ? (l.name || l.email) : 'Add a leader'),
+      el('div', { class: 'field' }, emLabel, em),
       el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { for: 'lname', text: 'Name' }), nm), el('div', { class: 'field' }, el('label', { for: 'lrole', text: 'Role' }), role)),
-      el('label', { class: 'row', for: 'lactive', style: 'min-height:48px' }, active, el('div', { class: 'main' }, el('div', { class: 'name', text: 'Can sign in' }), el('div', { class: 'sub', text: 'Untick to remove access. They are signed out everywhere.' }))),
+      el('label', { class: 'row', for: 'lactive', style: 'min-height:48px' }, active, el('div', { class: 'main' }, activeLabel, activeSub)),
       el('button', { class: 'btn primary', type: 'submit' }, 'Save'),
-      email ? el('button', { class: 'btn', type: 'button', onclick: () => save('signOutEverywhere', { email }, `Signed ${l.name || email} out on every device`, closeSheet) }, 'Sign out everywhere') : null);
+      hadEmail && l.role !== 'No sign-in' ? el('button', { class: 'btn', type: 'button', onclick: () => save('signOutEverywhere', { email: l.email }, `Signed ${l.name || l.email} out on every device`, closeSheet) }, 'Sign out everywhere') : null);
   });
 }
 

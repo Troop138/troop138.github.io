@@ -26,7 +26,10 @@ const TABS = {
 
 const CATEGORIES = ['Rank', 'Patrol patch', 'Merit badge', 'Uniform', 'Position', 'Pin', 'Award & card', 'Eagle', 'Other'];
 const CHARGE_RULES = ['Free', 'Always charge', 'First one free'];
-const ROLES = ['Admin', 'Leader', 'Treasurer'];
+// No sign-in: leaders without an account. They can't sign in; they're listed so paper-log
+// give-outs can be attributed to them by name (Email may be blank).
+const ROLES = ['Admin', 'Leader', 'Treasurer', 'No sign-in'];
+const NO_SIGN_IN = 'No sign-in';
 // Pending: owed. Transferred to Treasurer: sent to the treasurer to collect. Waived: not charged (with a reason).
 const CHARGE_STATUSES = ['Pending', 'Transferred to Treasurer', 'Waived'];
 const LOG_TYPES = ['out', 'in', 'count', 'return'];
@@ -351,8 +354,10 @@ function sessionUser_(token) {
 
 function findLeader_(email) {
   email = String(email || '').toLowerCase().trim();
+  if (!email) return null;
   const row = readTable_('leaders').find(r => String(r['Email']).toLowerCase().trim() === email);
   if (!row || row['Active'] === false || String(row['Active']).toUpperCase() === 'FALSE') return null;
+  if (row['Role'] === NO_SIGN_IN) return null;
   const role = ROLES.indexOf(row['Role']) >= 0 ? row['Role'] : 'Leader';
   return { email, name: String(row['Name'] || email.split('@')[0]), role };
 }
@@ -403,7 +408,7 @@ function getData_(me) {
     sheetUrl: me.role === 'Admin' ? SpreadsheetApp.getActive().getUrl() : '',
   };
   if (me.role === 'Admin') {
-    out.leaders = readTable_('leaders').filter(r => r['Email']).map(r => ({
+    out.leaders = readTable_('leaders').filter(r => r['Email'] || r['Name']).map(r => ({
       email: String(r['Email']).toLowerCase(), name: String(r['Name'] || ''), role: String(r['Role'] || 'Leader'), active: r['Active'] !== false,
     }));
   }
@@ -672,19 +677,32 @@ function setChargeStatus_(me, a) {
 }
 
 function saveLeader_(me, a) {
-  const email = String(a.email || '').toLowerCase().trim();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw apiError_('bad_request', 'Enter a valid email address.');
   const role = ROLES.indexOf(a.role) >= 0 ? a.role : 'Leader';
+  const noSignIn = role === NO_SIGN_IN;
+  const email = String(a.email || '').toLowerCase().trim();
+  const name = String(a.name || '').trim().slice(0, 80);
+  if (email || !noSignIn) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw apiError_('bad_request', noSignIn ? 'Enter a valid email address, or leave it blank.' : 'Enter a valid email address.');
+  }
+  if (noSignIn && !name) throw apiError_('bad_request', 'Enter their name. It is how paper-log give-outs are matched to them.');
   const active = a.active !== false;
   const rows = readTable_('leaders');
-  const row = rows.find(r => String(r['Email']).toLowerCase().trim() === email);
-  if (email === me.email && (role !== 'Admin' || !active)) {
-    const otherAdmins = rows.filter(r => r['Role'] === 'Admin' && r['Active'] !== false && String(r['Email']).toLowerCase() !== email);
+  const lc = x => String(x || '').toLowerCase().trim();
+  // Find the row being edited: by its original email, else (for rows with no email) its original name.
+  const origEmail = a.origEmail != null ? lc(a.origEmail) : email;
+  const origName = a.origName != null ? lc(a.origName) : lc(name);
+  const row = origEmail ? rows.find(r => lc(r['Email']) === origEmail)
+    : rows.find(r => !lc(r['Email']) && lc(r['Name']) === origName);
+  if (email && rows.some(r => r !== row && lc(r['Email']) === email)) throw apiError_('conflict', `${email} is already on the leader list.`);
+  if (name && rows.some(r => r !== row && lc(r['Name']) === lc(name) && r['Active'] !== false)) throw apiError_('conflict', `Someone named ${name} is already on the leader list. Add a last name or initial so paper-log entries match one person.`);
+  if (email && email === me.email && (role !== 'Admin' || !active)) {
+    const otherAdmins = rows.filter(r => r['Role'] === 'Admin' && r['Active'] !== false && lc(r['Email']) !== email);
     if (!otherAdmins.length) throw apiError_('conflict', "You're the only admin. Make someone else an admin first.");
   }
-  const vals = { 'Email': email, 'Name': String(a.name || '').trim().slice(0, 80), 'Role': role, 'Active': active };
+  const vals = { 'Email': email, 'Name': name, 'Role': role, 'Active': active };
   if (row) updateRow_('leaders', row._row, vals); else appendRows_('leaders', [vals]);
-  if (!active || (row && row['Role'] !== role)) revokeSessions_(email);
+  const oldEmail = row ? lc(row['Email']) : '';
+  if (oldEmail && (!active || row['Role'] !== role || oldEmail !== email)) revokeSessions_(oldEmail);
   return true;
 }
 
@@ -698,8 +716,8 @@ function memo_(k) {
   if (!MEMO_[k]) {
     const sh = sheet_(k), vals = sh.getDataRange().getValues(), h = {};
     (vals[0] || []).forEach((x, i) => { if (x !== '') h[String(x).trim()] = i; });
-    const kc = keyCol_(h);
-    let last = vals.length; while (last > 1 && (vals[last - 1][kc] === '' || vals[last - 1][kc] === null)) last--;
+    const kcs = keyCols_(h);
+    let last = vals.length; while (last > 1 && !hasKey_(vals[last - 1], kcs)) last--;
     MEMO_[k] = { sh, h, vals, last, width: (vals[0] || []).length };
   }
   return MEMO_[k];
@@ -718,11 +736,14 @@ function headerMap_(sh) {
   return m;
 }
 
-/** The column that identifies a row: ID, Email (Leaders) or Setting. */
-function keyCol_(h) {
-  const k = ['ID', 'Email', 'Setting'].find(n => h[n] != null);
-  return k ? h[k] : 0;
+/** The columns that identify a row: ID, Setting, or Email + Name (Leaders; No sign-in leaders may have no email). */
+function keyCols_(h) {
+  if (h['ID'] != null) return [h['ID']];
+  if (h['Setting'] != null) return [h['Setting']];
+  if (h['Email'] != null) return [h['Email']].concat(h['Name'] != null ? [h['Name']] : []);
+  return [0];
 }
+const hasKey_ = (row, kcs) => kcs.some(c => row[c] !== '' && row[c] !== null && row[c] !== undefined);
 
 /**
  * Last row that has a value in the key column. Checkbox columns make empty
@@ -731,9 +752,9 @@ function keyCol_(h) {
 function lastDataRow_(sh) {
   const n = sh.getLastRow();
   if (n < 2) return n;
-  const c = keyCol_(headerMap_(sh));
-  const v = sh.getRange(1, c + 1, n, 1).getValues();
-  for (let i = n - 1; i >= 1; i--) if (v[i][0] !== '' && v[i][0] !== null) return i + 1;
+  const kcs = keyCols_(headerMap_(sh));
+  const v = sh.getRange(1, 1, n, Math.max(...kcs) + 1).getValues();
+  for (let i = n - 1; i >= 1; i--) if (hasKey_(v[i], kcs)) return i + 1;
   return 1;
 }
 

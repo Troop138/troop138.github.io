@@ -18,6 +18,7 @@
       ss.getSheetByName('Leaders').appendRow(['demo.admin@example.com', 'Demo Admin', 'Admin', true]);
       ss.getSheetByName('Leaders').appendRow(['demo.leader@example.com', 'Demo Leader', 'Leader', true]);
       ss.getSheetByName('Leaders').appendRow(['demo.treasurer@example.com', 'Demo Treasurer', 'Treasurer', true]);
+      ss.getSheetByName('Leaders').appendRow(['', 'Pat Paperlog', 'No sign-in', true]);
       const prices = { 'Rank': 3.29, 'Merit badge': 3.99, 'Award & card': 0.29, 'Other': 1 };
       const items = ss.getSheetByName('Items');
       STARTER_ITEMS.forEach(([n, c, rule, re, eagle], i) => {
