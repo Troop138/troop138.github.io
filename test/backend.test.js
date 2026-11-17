@@ -248,4 +248,61 @@ test('changing a signed-in leader to No sign-in signs them out', () => {
   assert.strictEqual(api(t, 'getData').code, 'unauthorized');
 });
 
+// --- give-out date
+ok(api(admin, 'saveLeader', { email: 'dee@example.com', name: 'Dee', role: 'Leader', active: true }));
+const dee = login('dee@example.com');
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+test('give-out with a past date is logged on that day, with charges dated the same', () => {
+  const sid = ok(api(dee, 'addScout', { first: 'Dated', last: 'Scout' })).id;
+  const past = new Date(Date.now() - 7 * 864e5);
+  const r = ok(api(dee, 'give', { scoutId: sid, lines: [{ itemId: 'i3', qty: 2 }], date: ymd(past) }));
+  const d = ok(api(dee, 'getData'));
+  const row = d.log.find(l => l.id === r.logIds[0]);
+  assert.strictEqual(ymd(new Date(row.at)), ymd(past));
+  assert.ok(/^Entered /.test(row.note), row.note);
+  const ch = d.charges.find(c => c.logId === r.logIds[0] || c.scoutId === sid);
+  assert.ok(ch, 'second sash charged'); assert.strictEqual(ymd(new Date(ch.at)), ymd(past));
+  ok(api(dee, 'undo', { logIds: r.logIds }), 'leader can still undo a backdated entry they just made');
+});
+test('give-out date: today is a normal entry; future and bad dates are refused', () => {
+  const sid = ok(api(dee, 'addScout', { first: 'Today', last: 'Scout' })).id;
+  const r = ok(api(dee, 'give', { scoutId: sid, lines: [{ itemId: 'i1', qty: 1 }], date: ymd(new Date()) }));
+  assert.strictEqual(ok(api(dee, 'getData')).log.find(l => l.id === r.logIds[0]).note, '');
+  assert.strictEqual(api(dee, 'give', { scoutId: sid, lines: [{ itemId: 'i1', qty: 1 }], date: ymd(new Date(Date.now() + 2 * 864e5)) }).code, 'bad_request');
+  assert.strictEqual(api(dee, 'give', { scoutId: sid, lines: [{ itemId: 'i1', qty: 1 }], date: '2026-02-30' }).code, 'bad_request');
+  assert.strictEqual(api(dee, 'give', { scoutId: sid, lines: [{ itemId: 'i1', qty: 1 }], date: ymd(new Date(Date.now() - 400 * 864e5)) }).code, 'bad_request');
+});
+
+// --- email-code sign-in
+const codeFrom = m => (m.subject.match(/(\d{6})/) || [])[1];
+test('email code: a leader gets a code by email and signs in with it, once', () => {
+  ctx.sentMail.length = 0;
+  ok(api(admin, 'saveLeader', { email: 'maggie@hotmail.com', name: 'Maggie', role: 'Admin', active: true }));
+  ok(call('requestCode', { args: { email: 'Maggie@Hotmail.com' } }));
+  assert.strictEqual(ctx.sentMail.length, 1); assert.strictEqual(ctx.sentMail[0].to, 'maggie@hotmail.com');
+  const code = codeFrom(ctx.sentMail[0]); assert.ok(code);
+  assert.strictEqual(call('loginCode', { args: { email: 'maggie@hotmail.com', code: code === '000000' ? '111111' : '000000' } }).code, 'bad_code');
+  const r = ok(call('loginCode', { args: { email: 'maggie@hotmail.com', code } }));
+  assert.strictEqual(r.me.role, 'Admin');
+  ok(api(r.token, 'getData'));
+  assert.strictEqual(call('loginCode', { args: { email: 'maggie@hotmail.com', code } }).code, 'bad_code', 'a code works once');
+});
+test('email code: people not on the list get no email but the same reply', () => {
+  ctx.sentMail.length = 0;
+  ok(call('requestCode', { args: { email: 'stranger@example.com' } }));
+  ok(api(admin, 'saveLeader', { email: '', name: 'Paper Pat', role: 'No sign-in' }));
+  ok(api(admin, 'saveLeader', { email: 'nosign@example.com', name: 'No Sign', role: 'No sign-in' }));
+  ok(call('requestCode', { args: { email: 'nosign@example.com' } }));
+  assert.strictEqual(ctx.sentMail.length, 0);
+});
+test('email code: one per minute, and 5 wrong tries kills the code', () => {
+  ctx.sentMail.length = 0;
+  ok(api(admin, 'saveLeader', { email: 'rae@example.com', name: 'Rae', role: 'Leader', active: true }));
+  ok(call('requestCode', { args: { email: 'rae@example.com' } }));
+  assert.strictEqual(call('requestCode', { args: { email: 'rae@example.com' } }).code, 'slow_down');
+  const code = codeFrom(ctx.sentMail[0]); const wrong = code === '000000' ? '111111' : '000000';
+  for (let i = 0; i < 5; i++) assert.strictEqual(call('loginCode', { args: { email: 'rae@example.com', code: wrong } }).code, 'bad_code');
+  assert.strictEqual(call('loginCode', { args: { email: 'rae@example.com', code } }).code, 'bad_code', 'right code no longer works');
+});
+
 console.log(`\n${passed} passed`);

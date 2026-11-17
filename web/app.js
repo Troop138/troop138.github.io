@@ -40,6 +40,7 @@ function el(tag, attrs, ...kids) {
   for (const k of kids.flat()) { if (k == null || k === false) continue; e.append(k.nodeType ? k : document.createTextNode(String(k))); }
   return e;
 }
+const localYmd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* private mode */ } };
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
@@ -90,7 +91,7 @@ async function api(action, args) {
   }
   if (!res.ok) {
     const err = Object.assign(new Error(res.error || 'Something went wrong.'), { code: res.code });
-    if (res.code === 'unauthorized' && action !== 'login') { signOutLocal(); showSignIn(res.error); }
+    if (res.code === 'unauthorized' && !['login', 'requestCode', 'loginCode'].includes(action)) { signOutLocal(); showSignIn(res.error); }
     throw err;
   }
   freshData = res.fresh || null;
@@ -159,7 +160,8 @@ function showSignIn(message) {
       el('a', { class: 'btn', href: '?demo=1' }, 'Try the demo'));
   } else {
     const holder = el('div', { id: 'gsi' });
-    card.append(holder, el('p', { class: 'mini muted', style: 'margin:0', text: 'Use the Google account the closet admin added for you.' }));
+    card.append(holder, el('p', { class: 'mini muted', style: 'margin:0', text: 'Use the Google account the closet admin added for you.' }),
+      el('button', { class: 'linkbtn', type: 'button', onclick: () => { err.textContent = ''; codeSignIn(card, err); } }, 'No Google account? Get a code by email'));
     loadGoogle().then(() => {
       window.google.accounts.id.initialize({
         client_id: CFG.googleClientId, ux_mode: 'popup', auto_select: true, itp_support: true,
@@ -175,6 +177,46 @@ function showSignIn(message) {
   card.append(err);
   app.append(el('div', { class: 'signin' }, card));
 }
+/** Email-code sign-in: email -> 6-digit code from the troop account -> signed in. */
+function codeSignIn(card, err) {
+  const box = el('form', { class: 'codeform', novalidate: true });
+  const old = card.querySelector('.codeform'); if (old) old.remove();
+  card.querySelector('.linkbtn')?.remove();
+  card.insertBefore(box, err);
+  const stepEmail = () => {
+    const em = el('input', { id: 'cemail', type: 'email', value: lsGet('tc.codeEmail'), placeholder: 'you@example.com', autocomplete: 'email', required: true });
+    const btn = el('button', { class: 'btn primary', type: 'submit', style: 'width:100%' }, 'Email me a code');
+    box.replaceChildren(el('div', { class: 'field', style: 'width:100%;text-align:left' }, el('label', { for: 'cemail', text: 'Email on the leader list' }), em), btn);
+    box.onsubmit = async e => {
+      e.preventDefault();
+      const email = em.value.trim(); if (!email) { em.focus(); return; }
+      btn.disabled = true; err.textContent = 'Sending…';
+      try { await api('requestCode', { email }); lsSet('tc.codeEmail', email); err.textContent = ''; stepCode(email); }
+      catch (x) { err.textContent = x.message; btn.disabled = false; }
+    };
+    em.focus();
+  };
+  const stepCode = (email) => {
+    const cd = el('input', { id: 'ccode', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '123456', required: true, style: 'letter-spacing:.3em;text-align:center;font-size:1.3rem' });
+    const btn = el('button', { class: 'btn primary', type: 'submit', style: 'width:100%' }, 'Sign in');
+    box.replaceChildren(
+      el('p', { class: 'mini', style: 'margin:0', text: `If ${email} is on the leader list, a 6-digit code is on its way. Check spam if it doesn't show up in a minute.` }),
+      el('div', { class: 'field', style: 'width:100%;text-align:left' }, el('label', { for: 'ccode', text: 'Code' }), cd), btn,
+      el('div', { style: 'display:flex;gap:16px;justify-content:center' },
+        el('button', { class: 'linkbtn', type: 'button', onclick: async () => { err.textContent = 'Sending…'; try { await api('requestCode', { email }); err.textContent = 'New code sent.'; } catch (x) { err.textContent = x.message; } } }, 'Send a new code'),
+        el('button', { class: 'linkbtn', type: 'button', onclick: () => { err.textContent = ''; stepEmail(); } }, 'Different email')));
+    box.onsubmit = async e => {
+      e.preventDefault();
+      const code = cd.value.replace(/\D/g, ''); if (code.length !== 6) { err.textContent = 'Enter the 6-digit code from the email.'; cd.focus(); return; }
+      btn.disabled = true; err.textContent = 'Signing in…';
+      try { const d = await api('loginCode', { email, code }); S.token = d.token; lsSet('tc.token', d.token); startApp(); }
+      catch (x) { err.textContent = x.message; btn.disabled = false; cd.select(); }
+    };
+    cd.focus();
+  };
+  stepEmail();
+}
+
 let gPromise;
 function loadGoogle() {
   if (window.google && window.google.accounts) return Promise.resolve();
@@ -418,6 +460,12 @@ function viewGive() {
   setSplit();
   v.append(el('div', { class: 'who' }, el('span', {}, el('span', { class: 'label', text: 'Step 2 of 2 · Giving to' }), s.name),
     el('button', { class: 'btn small', type: 'button', onclick: () => { g.scoutId = null; g.cart = {}; S.scoutQ = ''; renderToolbar(); render(); } }, 'Change')));
+  // Date given: today unless they're entering from paper later.
+  const today = localYmd(new Date());
+  if (!g.date || g.date > today) g.date = today;
+  const dt = el('input', { id: 'gdate', type: 'date', value: g.date, max: today, onchange: () => { g.date = dt.value && dt.value <= today ? dt.value : today; dt.value = g.date; renderCartSummary(); render(); } });
+  v.append(el('div', { class: 'field dategiven' }, el('label', { for: 'gdate', text: 'Date given' }), dt,
+    g.date !== today ? el('span', { class: 'mini muted', text: 'Logged as given on this day.' }) : null));
   v.append(cartRows(g.cart, 'give'));
   const confirm = async () => {
     const c = cartCharges(g.cart, g.scoutId);
@@ -425,24 +473,25 @@ function viewGive() {
     const n = cartCount(g.cart);
     const lines = Object.entries(g.cart).map(([itemId, l]) => ({ itemId, qty: l.n, waiveReason: l.waive !== null ? (l.waive.trim() || 'No reason given') : '' }));
     // Clear the screen right away and save in the background; put the cart back if the save fails.
-    const cart = g.cart, scoutId = g.scoutId;
+    const cart = g.cart, scoutId = g.scoutId, date = g.date !== today ? g.date : '';
     lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) - l.qty));
-    g.cart = {}; g.scoutId = null; S.scoutQ = ''; S.q = ''; S.pending = (S.pending || 0) + 1; renderToolbar(); render(); window.scrollTo(0, 0);
+    g.cart = {}; g.scoutId = null; g.date = ''; S.scoutQ = ''; S.q = ''; S.pending = (S.pending || 0) + 1; renderToolbar(); render(); window.scrollTo(0, 0);
     toast(`Saving ${n} item${n > 1 ? 's' : ''} for ${s.name}…`);
     try {
-      const r = await send('give', { scoutId, lines });
+      const r = await send('give', date ? { scoutId, lines, date } : { scoutId, lines });
       const undo = async () => { try { await write('undo', { logIds: r.logIds }, 'Undone'); } catch (e) { fail(e); } };
       toast(`Logged ${n} item${n > 1 ? 's' : ''} to ${s.name}` + (r.charged ? ` · ${money(r.charged)} charge` : ''), undo);
     } catch (e) {
       lines.forEach(l => S.qty.set(l.itemId, qtyOf(l.itemId) + l.qty));
-      if (!g.scoutId && !cartCount(g.cart)) { g.scoutId = scoutId; g.cart = cart; renderToolbar(); }
+      if (!g.scoutId && !cartCount(g.cart)) { g.scoutId = scoutId; g.cart = cart; g.date = date; renderToolbar(); }
       toast(`Not saved: ${(e && e.message) || "couldn't reach the closet"} Your items are still in the cart.`);
     } finally { done(); }
   };
   summaryHook = () => {
     const n = cartCount(g.cart), c = cartCharges(g.cart, g.scoutId);
     const label = S.busy ? 'Saving…' : n ? `Give ${n} item${n > 1 ? 's' : ''} to ${s.name}` : "Tap + on what they're receiving";
-    const sum = n ? [c.due ? `${money(c.due)} will be charged` : 'No charge', c.waived ? `${money(c.waived)} not charged` : ''].filter(Boolean).join(' · ') : '';
+    const dated = g.date && g.date !== localYmd(new Date()) ? 'Dated ' + new Date(g.date + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+    const sum = n ? [dated, c.due ? `${money(c.due)} will be charged` : 'No charge', c.waived ? `${money(c.waived)} not charged` : ''].filter(Boolean).join(' · ') : dated;
     setAction(label, sum, confirm, !n || S.busy);
     const a = $('#aside'); a.replaceChildren(
       el('h3', { text: `Giving to ${s.name}` }),

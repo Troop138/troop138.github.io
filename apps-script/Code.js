@@ -283,6 +283,8 @@ function doPost(e) {
   try {
     const action = String(req.action || '');
     if (action === 'login') return json_({ ok: true, data: login_(req.idToken || (req.args && req.args.idToken)) });
+    if (action === 'requestCode') return json_({ ok: true, data: withLock_(() => requestCode_(req.args || {})) });
+    if (action === 'loginCode') return json_({ ok: true, data: withLock_(() => loginCode_(req.args || {})) });
     const me = sessionUser_(req.token);
     const fn = ACTIONS[action];
     if (!fn) throw apiError_('bad_request', 'Unknown action.');
@@ -331,12 +333,63 @@ function login_(idToken) {
   const email = String(t.email).toLowerCase();
   const leader = findLeader_(email);
   if (!leader) throw apiError_('not_a_leader', `${email} isn't on the leader list. Ask the closet admin to add you.`);
+  return startSession_(leader);
+}
 
+function startSession_(leader) {
   const token = Utilities.getUuid() + Utilities.getUuid();
   const days = Math.max(1, Number(getSetting_('Session days')) || 30);
-  PropertiesService.getScriptProperties().setProperty('s_' + sha256_(token), JSON.stringify({ email, exp: Date.now() + days * 864e5 }));
+  PropertiesService.getScriptProperties().setProperty('s_' + sha256_(token), JSON.stringify({ email: leader.email, exp: Date.now() + days * 864e5 }));
   pruneSessions_();
   return { token, me: publicMe_(leader), expiresInDays: days };
+}
+
+/*
+ * Email-code sign-in, for leaders without a Google account. The leader enters the
+ * email on the Leaders tab; the troop account emails a 6-digit code (good for 10
+ * minutes, 5 tries). Only addresses on the leader list get mail, and the reply is
+ * the same either way so the form can't be used to probe who is on the list.
+ */
+const CODE_MINUTES = 10, CODE_TRIES = 5, CODE_GAP_MS = 60e3, CODES_PER_HOUR = 5;
+const codeKey_ = email => 'c_' + sha256_('code:' + email);
+
+function requestCode_(a) {
+  const email = String(a.email || '').toLowerCase().trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw apiError_('bad_request', 'Enter a valid email address.');
+  const sentMsg = { sent: true, minutes: CODE_MINUTES };
+  const leader = findLeader_(email);
+  if (!leader) return sentMsg;
+  const props = PropertiesService.getScriptProperties(), key = codeKey_(email), now = Date.now();
+  let rec = null; try { rec = JSON.parse(props.getProperty(key) || 'null'); } catch (e) { rec = null; }
+  const recent = ((rec && rec.sends) || []).filter(t => now - t < 3600e3);
+  if (recent.length && now - recent[recent.length - 1] < CODE_GAP_MS) throw apiError_('slow_down', 'A code was just sent. Wait a minute, then ask for another.');
+  if (recent.length >= CODES_PER_HOUR) throw apiError_('slow_down', 'Too many codes asked for. Try again in an hour.');
+  const code = String(parseInt(sha256_(Utilities.getUuid() + now).slice(0, 12), 16) % 1e6).padStart(6, '0');
+  recent.push(now);
+  props.setProperty(key, JSON.stringify({ hash: sha256_(email + ':' + code), exp: now + CODE_MINUTES * 60e3, tries: 0, sends: recent }));
+  const title = String(getSetting_('App title') || 'Troop Closet');
+  MailApp.sendEmail({ to: email, name: title, subject: `${title} sign-in code: ${code}`,
+    body: `Hi ${leader.name},\n\nYour ${title} sign-in code is ${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, you can ignore this email.` });
+  pruneSessions_();
+  return sentMsg;
+}
+
+function loginCode_(a) {
+  const email = String(a.email || '').toLowerCase().trim();
+  const code = String(a.code || '').replace(/\D/g, '');
+  const props = PropertiesService.getScriptProperties(), key = codeKey_(email);
+  let rec = null; try { rec = JSON.parse(props.getProperty(key) || 'null'); } catch (e) { rec = null; }
+  if (!rec || !rec.hash || rec.exp < Date.now()) throw apiError_('bad_code', 'That code has expired. Ask for a new one.');
+  if (sha256_(email + ':' + code) !== rec.hash) {
+    rec.tries = (rec.tries || 0) + 1;
+    if (rec.tries >= CODE_TRIES) { delete rec.hash; props.setProperty(key, JSON.stringify(rec)); throw apiError_('bad_code', 'Too many wrong codes. Ask for a new one.'); }
+    props.setProperty(key, JSON.stringify(rec));
+    throw apiError_('bad_code', "That code isn't right. Check the email and try again.");
+  }
+  delete rec.hash; props.setProperty(key, JSON.stringify(rec)); // one use only
+  const leader = findLeader_(email);
+  if (!leader) throw apiError_('not_a_leader', `${email} isn't on the leader list. Ask the closet admin to add you.`);
+  return startSession_(leader);
 }
 
 function sessionUser_(token) {
@@ -376,7 +429,11 @@ function revokeSessions_(email, onlyKey) {
 
 function pruneSessions_() {
   const props = PropertiesService.getScriptProperties(), all = props.getProperties(), now = Date.now();
-  Object.keys(all).forEach(k => { if (k.indexOf('s_') === 0) { try { if (JSON.parse(all[k]).exp < now) props.deleteProperty(k); } catch (e) { props.deleteProperty(k); } } });
+  Object.keys(all).forEach(k => {
+    if (k.indexOf('s_') === 0) { try { if (JSON.parse(all[k]).exp < now) props.deleteProperty(k); } catch (e) { props.deleteProperty(k); } }
+    // Email codes: keep the record for an hour after the last send (for the per-hour limit).
+    if (k.indexOf('c_') === 0) { try { const r = JSON.parse(all[k]); if (Math.max(r.exp || 0, ...(r.sends || []).map(t => t + 3600e3)) < now) props.deleteProperty(k); } catch (e) { props.deleteProperty(k); } }
+  });
 }
 
 function need_(me, roles) {
@@ -441,8 +498,11 @@ function chargeOut_(r) {
 
 /**
  * Give items to a scout.
- * args: { scoutId, lines: [{ itemId, qty, waiveReason? }] }
+ * args: { scoutId, lines: [{ itemId, qty, waiveReason? }], date? }
  * Charges follow each item's charge rule. "First one free" checks the scout's history.
+ * date (YYYY-MM-DD, optional): the day the items were handed out, for entries made later
+ * from paper. Not in the future, at most a year back. Backdated rows get the time of day
+ * 12:00 PM and a Note "Entered <today>" so the real entry date isn't lost.
  */
 function give_(me, a) {
   const scout = scoutById_(a.scoutId);
@@ -450,11 +510,31 @@ function give_(me, a) {
   const lines = cleanLines_(a.lines);
   if (me.role !== 'Admin' && lines.some(l => String(l.waiveReason || '').trim())) throw apiError_('forbidden', 'Only the closet admin can give an item without charging.');
   const ctx = giveContext_();
-  lines.forEach(l => giveOne_(me, ctx, scout, l.itemId, l.qty, '', l.waiveReason));
+  const when = giveDate_(a.date, ctx.now);
+  let note = '';
+  if (when) { ctx.now = when; note = 'Entered ' + mdy_(new Date()); }
+  lines.forEach(l => giveOne_(me, ctx, scout, l.itemId, l.qty, note, l.waiveReason));
   const logRows = ctx.logRows, chargeRows = ctx.chargeRows;
   appendRows_('log', logRows);
   if (chargeRows.length) appendRows_('charges', chargeRows);
   return { logIds: logRows.map(r => r['ID']), chargeIds: chargeRows.map(r => r['ID']), charged: round2_(chargeRows.filter(r => r['Status'] === 'Pending').reduce((s, r) => s + r['Amount'], 0)) };
+}
+
+const ymd_ = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const mdy_ = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+/** A past give-out date (YYYY-MM-DD) as noon that day, or null for today / none. Dates use the script's time zone. */
+function giveDate_(s, now) {
+  s = String(s || '').trim();
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) throw apiError_('bad_request', 'That date is not valid.');
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);
+  if (isNaN(d) || ymd_(d) !== s) throw apiError_('bad_request', 'That date is not valid.');
+  const today = ymd_(now);
+  if (s === today) return null;
+  if (s > today) throw apiError_('bad_request', "The date can't be in the future.");
+  if (now - d > 366 * 864e5) throw apiError_('bad_request', 'That date is more than a year ago. Ask the closet admin to enter it.');
+  return d;
 }
 
 /** Shared state for one batch of give-outs, so "first one free" sees earlier lines in the same batch. */
@@ -555,7 +635,9 @@ function undo_(me, a) {
   if (!ids.size) return true;
   const log = readTable_('log').filter(r => ids.has(String(r['ID'])));
   log.forEach(r => {
-    const own = String(r['Logged by']).toLowerCase() === me.email && Date.now() - time_(r['When']) < 864e5;
+    const entered = /Entered (\d+)\/(\d+)\/(\d{4})/.exec(String(r['Note'] || ''));
+    const enteredAt = entered ? new Date(Number(entered[3]), Number(entered[1]) - 1, Number(entered[2]), 23, 59).getTime() : 0;
+    const own = String(r['Logged by']).toLowerCase() === me.email && Date.now() - Math.max(time_(r['When']), enteredAt) < 864e5;
     if (me.role !== 'Admin' && !own) throw apiError_('forbidden', 'Only the closet admin can remove that entry. You can remove your own entries for 24 hours.');
   });
   const charges = readTable_('charges').filter(c => ids.has(String(c['Log ID'])));

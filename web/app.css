@@ -160,6 +160,8 @@ table.report tr.grouprow td{background:var(--accent-soft);color:var(--accent);fo
 .signin .card{max-width:400px;width:100%;display:flex;flex-direction:column;gap:16px;align-items:center;text-align:center;padding:28px 20px}
 .signin .mark{width:72px;height:72px}
 .signin .err{color:var(--bad-fg);font-size:.92rem}
+.signin .codeform{width:100%;display:flex;flex-direction:column;gap:12px;align-items:center}
+.linkbtn{background:none;border:0;padding:6px 2px;color:var(--accent,inherit);text-decoration:underline;font:inherit;font-size:.92rem;cursor:pointer;min-height:44px}
 #gsi{min-height:44px}
 
 /* ---------- computer layout ---------- */
@@ -202,3 +204,7 @@ table.report tr.grouprow td{background:var(--accent-soft);color:var(--accent);fo
 
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
 .eaglereq{margin-left:6px;font-size:.95em}
+
+.dategiven{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 2px 0}
+.dategiven label{margin:0}
+.dategiven input{width:auto;min-height:40px}
